@@ -115,6 +115,15 @@ public class GlassButtonView extends View {
         int w = getWidth();
         int h = getHeight();
 
+        mRect.set(mInset, mInset, w - mInset, h - mInset);
+        float r = Math.max(1f, mRadius - mInset);
+
+        // 所有绘制都裁到圆形内；否则 View 的方形绘制区会在玻璃外留下一圈方框。
+        canvas.save();
+        Path clip = new Path();
+        clip.addRoundRect(mRect, r, r, Path.Direction.CW);
+        canvas.clipPath(clip);
+
         // 1) content：真实界面背景（原按钮已被抹掉）
         if (mBackdrop != null && !mBackdrop.isRecycled()) {
             mSrc.set(mSrcX, mSrcY, mSrcX + w, mSrcY + h);
@@ -125,14 +134,13 @@ public class GlassButtonView extends View {
         }
 
         // 2) 玻璃表面
-        mRect.set(mInset, mInset, w - mInset, h - mInset);
-        float r = Math.max(1f, mRadius - mInset);
         canvas.drawRoundRect(mRect, r, r, mTint);
         canvas.drawRoundRect(mRect, r, r, mStroke);
         canvas.drawRoundRect(mRect, r, r, mHighlight);
 
         // 3) 重画的图标（替换掉原按钮的图标）
         drawIcon(canvas, w, h);
+        canvas.restore();
     }
 
     private void drawIcon(Canvas c, int w, int h) {

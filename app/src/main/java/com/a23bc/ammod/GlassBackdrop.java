@@ -77,14 +77,16 @@ public class GlassBackdrop {
         bc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
         bc.drawBitmap(mSmall, null, new Rect(0, 0, mW, mH), mFilter);
 
-        // 干净背景 = 原图，三个按钮区域换成模糊背景
+        // 干净背景 = 原图；三个按钮区域用「正上方同尺寸的干净背景」贴补。
+        // 用模糊版仍会留下原生方形按钮的色块轮廓，贴补才能真正把整个按钮抹掉。
         Canvas cc = new Canvas(mClean);
         cc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
         cc.drawBitmap(mRaw, 0f, 0f, null);
         for (Rect r : mButtonRects) {
-            Rect rr = new Rect(Math.max(0, r.left - 28), Math.max(0, r.top - 28),
-                    Math.min(mW, r.right + 28), Math.min(mH, r.bottom + 28));
-            cc.drawBitmap(mBlurred, rr, rr, null);
+            int bw = r.width();
+            int bh = r.height();
+            Rect src = new Rect(r.left, 0, Math.min(mW, r.left + bw), Math.min(mH, bh));
+            cc.drawBitmap(mRaw, src, r, null);
         }
         return mClean;
     }
