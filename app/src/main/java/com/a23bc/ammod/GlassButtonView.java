@@ -37,7 +37,7 @@ public class GlassButtonView extends View {
         setClickable(false);
         setFocusable(false);
         mStroke.setStyle(Paint.Style.STROKE);
-        mStroke.setColor(Color.argb(110, 255, 255, 255));
+        mStroke.setColor(Color.argb(160, 255, 255, 255));
         mHighlight.setStyle(Paint.Style.STROKE);
         // Highlight.Default 的 blendMode = BlendMode.Plus
         mHighlight.setBlendMode(BlendMode.PLUS);
@@ -46,16 +46,16 @@ public class GlassButtonView extends View {
     void configure(int w, int h, float density) {
         mRadius = Math.min(w, h) / 2f;
         // 库的 Highlight.width=0.5dp；这里放大到 1.5dp 让预览更可见
-        float sw = Math.max(1.5f, 1.5f * density);
+        float sw = Math.max(2f, 2f * density);
         mInset = sw;
         mHighlight.setStrokeWidth(sw);
-        mStroke.setStrokeWidth(Math.max(1f, 1f * density));
+        mStroke.setStrokeWidth(Math.max(1.5f, 1.5f * density));
 
         // 上亮下暗的玻璃反光
         mTint.setShader(new LinearGradient(
                 0f, 0f, 0f, h,
-                Color.argb(88, 255, 255, 255),
-                Color.argb(16, 255, 255, 255),
+                Color.argb(120, 255, 255, 255),
+                Color.argb(24, 255, 255, 255),
                 Shader.TileMode.CLAMP));
 
         RuntimeShader lens = new RuntimeShader(BackdropShaders.REFRACTION);
@@ -67,8 +67,9 @@ public class GlassButtonView extends View {
         lens.setFloatUniform("refractionAmount", -24f * density);
         lens.setFloatUniform("depthEffect", 0f);
 
+        // 库 LiquidButton 用 blur(2dp)；预览阶段降到 1dp 让高光边缘更清晰
         RenderEffect blur = RenderEffect.createBlurEffect(
-                2f * density, 2f * density, Shader.TileMode.CLAMP);
+                1f * density, 1f * density, Shader.TileMode.CLAMP);
         RenderEffect refraction = RenderEffect.createRuntimeShaderEffect(lens, "content");
         setRenderEffect(RenderEffect.createChainEffect(refraction, blur));
 

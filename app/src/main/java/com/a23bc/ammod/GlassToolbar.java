@@ -28,6 +28,9 @@ public class GlassToolbar {
     private static final Set<Integer> INSTALLED = new HashSet<>();
     private static final List<GlassButtonView> BUTTONS = new ArrayList<>();
 
+    private static boolean sVisible = false;
+    private static boolean sLoggedInit = false;
+
     private final View mDecor;
     private final View mToolbar;
 
@@ -52,8 +55,17 @@ public class GlassToolbar {
         }
     }
 
-    /** 由 HookMain 每次整树扫描后调用：无返回按钮的页面（如主页）隐藏玻璃层。 */
+    /**
+     * 由 HookMain 每次整树扫描后调用。
+     * 注意：setVisible 可能早于 install（那时 BUTTONS 还是空的），
+     * 所以不能用「状态没变就跳过」的短路，否则后创建的按钮会永远停在 GONE。
+     */
     static void setVisible(boolean visible) {
+        if (!sLoggedInit || sVisible != visible) {
+            Log.d(TAG, "glass visible=" + visible + " buttons=" + BUTTONS.size());
+            sLoggedInit = true;
+        }
+        sVisible = visible;
         for (GlassButtonView v : BUTTONS) {
             v.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
@@ -93,7 +105,7 @@ public class GlassToolbar {
         lp.topMargin = y;
         ((ViewGroup) mDecor).addView(v, lp);
         v.configure(sz, sz, mDecor.getResources().getDisplayMetrics().density);
-        v.setVisibility(View.GONE);
+        v.setVisibility(sVisible ? View.VISIBLE : View.GONE);
         v.bringToFront();
         BUTTONS.add(v);
     }
