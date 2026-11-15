@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed 装完模块后会自动推荐勾选的作用域 -->
+    <string-array name="module_scope">
+        <item>com.apple.android.music</item>
+    </string-array>
+</resources>

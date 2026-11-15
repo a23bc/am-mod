@@ -1,0 +1,4 @@
+// 顶层构建文件。本机不跑 Gradle，编译统一走 GitHub Actions。
+plugins {
+    id 'com.android.application' version '8.6.1' apply false
+}

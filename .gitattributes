@@ -1,0 +1,5 @@
+# 本机 core.autocrlf=true；shell 脚本被转成 CRLF 后 Git Bash 会报 \r 错误。
+*.sh text eol=lf
+
+# LSPosed 按行读取入口类名，统一 LF 更稳。
+app/src/main/assets/xposed_init text eol=lf
