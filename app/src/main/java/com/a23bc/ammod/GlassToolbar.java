@@ -33,6 +33,11 @@ public class GlassToolbar {
     private static final String TAG = "AMMod";
     private static final long REFRESH_MS = 500L;
     private static final Set<Integer> INSTALLED = new HashSet<>();
+    private static boolean sInstalled = false;
+
+    static boolean isInstalled() {
+        return sInstalled;
+    }
 
     private final View mDecor;
     private final Handler mHandler = new Handler(Looper.getMainLooper());
@@ -59,11 +64,13 @@ public class GlassToolbar {
         }
         try {
             new GlassToolbar(decor, toolX, toolY, toolW, toolH).start();
+            sInstalled = true;
             Log.d(TAG, "glass installed: 3 full replacement buttons");
         } catch (Throwable t) {
             synchronized (INSTALLED) {
                 INSTALLED.remove(key);
             }
+            sInstalled = false;
             Log.d(TAG, "glass install error: " + t);
         }
     }
