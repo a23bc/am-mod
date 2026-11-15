@@ -19,8 +19,9 @@ import java.util.Set;
  * 用 Kyant0/AndroidLiquidGlass 同款 shader 做玻璃高光与边缘折射，
  * 保持触摸穿透让原按钮照常工作。
  *
- * 只在有这几个按钮的页面显示（由 HookMain 扫描页面特征 id 后 setVisible）。
- * 按钮坐标按 1440x3168 基线等比缩放。
+ * 安装时机由 HookMain 轮询重试：ComposeView 的尺寸在 Fragment 切换时会短暂变 0，
+ * 一次失败不能放弃。按钮常显（顶部三个位置在主页也有原生按钮容器，不突兀）。
+ * 坐标按 1440x3168 基线等比缩放。
  */
 public class GlassToolbar {
 
@@ -28,22 +29,24 @@ public class GlassToolbar {
     private static final Set<Integer> INSTALLED = new HashSet<>();
     private static final List<GlassButtonView> BUTTONS = new ArrayList<>();
 
-    private static boolean sVisible = false;
-    private static boolean sLoggedInit = false;
-
     private final View mDecor;
     private final View mToolbar;
+
+    static boolean isInstalled() {
+        return !BUTTONS.isEmpty();
+    }
 
     static void install(View decor, View toolbar) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             Log.d(TAG, "glass skipped: need API 33+, got " + Build.VERSION.SDK_INT);
             return;
         }
-        if (!(decor instanceof ViewGroup) || toolbar.getWidth() <= 0) {
+        if (isInstalled() || !(decor instanceof ViewGroup) || toolbar.getWidth() <= 0) {
             return;
         }
+        int key = System.identityHashCode(decor);
         synchronized (INSTALLED) {
-            if (!INSTALLED.add(System.identityHashCode(decor))) {
+            if (!INSTALLED.add(key)) {
                 return;
             }
         }
@@ -51,23 +54,10 @@ public class GlassToolbar {
             new GlassToolbar(decor, toolbar).start();
             Log.d(TAG, "glass installed: 3 buttons on floating toolbar");
         } catch (Throwable t) {
+            synchronized (INSTALLED) {
+                INSTALLED.remove(key);
+            }
             Log.d(TAG, "glass install error: " + t);
-        }
-    }
-
-    /**
-     * 由 HookMain 每次整树扫描后调用。
-     * 注意：setVisible 可能早于 install（那时 BUTTONS 还是空的），
-     * 所以不能用「状态没变就跳过」的短路，否则后创建的按钮会永远停在 GONE。
-     */
-    static void setVisible(boolean visible) {
-        if (!sLoggedInit || sVisible != visible) {
-            Log.d(TAG, "glass visible=" + visible + " buttons=" + BUTTONS.size());
-            sLoggedInit = true;
-        }
-        sVisible = visible;
-        for (GlassButtonView v : BUTTONS) {
-            v.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -105,7 +95,6 @@ public class GlassToolbar {
         lp.topMargin = y;
         ((ViewGroup) mDecor).addView(v, lp);
         v.configure(sz, sz, mDecor.getResources().getDisplayMetrics().density);
-        v.setVisibility(sVisible ? View.VISIBLE : View.GONE);
         v.bringToFront();
         BUTTONS.add(v);
     }

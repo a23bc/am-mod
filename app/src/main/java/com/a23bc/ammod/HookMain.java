@@ -21,7 +21,7 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * v0.4.0 —— 控件普查 + 顶部工具栏液态玻璃预览。
+ * v0.4.1 —— 控件普查 + 顶部工具栏液态玻璃预览。
  *
  * 普查：只输出每个控件的真实 View 身份（id / 类名 / 屏幕绝对 bounds /
  * clickable / content-desc），不改传统 View 控件（APPLY_STYLE=false）。
@@ -41,7 +41,7 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "AMMod";
     private static final String TARGET = "com.apple.android.music";
-    private static final String VERSION = "v0.4.0";
+    private static final String VERSION = "v0.4.1";
 
     private static final boolean DUMP_CONTROLS = true;
     // 传统 View 控件仍保持原样，先只做顶部三个按钮的玻璃预览。
@@ -56,8 +56,6 @@ public class HookMain implements IXposedHookLoadPackage {
     private static final Set<Integer> SEEN = new HashSet<>();
     private static long sLastScan = 0L;
     private static boolean sTickerStarted = false;
-    private static boolean sGlassPosted = false;
-    private static boolean sPageHasToolbar = false;
 
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
@@ -128,16 +126,10 @@ public class HookMain implements IXposedHookLoadPackage {
             return;
         }
         sLastScan = now;
-        if (force) {
-            sPageHasToolbar = false;
-        }
         try {
             walk(root, 0);
         } catch (Throwable t) {
             log("scan error: " + t);
-        }
-        if (force) {
-            GlassToolbar.setVisible(sPageHasToolbar);
         }
     }
 
@@ -176,15 +168,6 @@ public class HookMain implements IXposedHookLoadPackage {
             return;
         }
 
-        // 这些 id 只出现在带顶部工具栏（返回 / 分享 / 更多选项）的页面：
-        // 歌单详情、全屏播放页。主页没有，用它控制玻璃层显隐。
-        // isShown() 过滤后台隐藏的播放页 View；否则冷启动后主页会被误判成有返回按钮。
-        if (v.isShown() && ("collection_header_artist".equals(id) || "button_play".equals(id)
-                || "play_pause".equals(id) || "player_controls".equals(id)
-                || "menu_action_button".equals(id))) {
-            sPageHasToolbar = true;
-        }
-
         if (v.getClass().getName().contains("compose.ui.platform")
                 || "floating_app_bar_container".equals(id)) {
             // 轮询每秒都会经过这里，必须去重，否则 COMPOSE_VIEW 会刷爆 logcat。
@@ -196,11 +179,11 @@ public class HookMain implements IXposedHookLoadPackage {
                         + (lc[0] + v.getWidth()) + "," + (lc[1] + v.getHeight()) + "]"
                         + " depth=" + depth);
             }
-            // 工具栏有尺寸时才装玻璃层；post 出去避免在遍历 View 树时 addView。
-            if (ENABLE_GLASS && !sGlassPosted
-                    && "floating_app_bar_container".equals(id)
-                    && v.getWidth() > 0 && v.getHeight() > 0) {
-                sGlassPosted = true;
+            // 轮询重试：ComposeView 尺寸在切换瞬间会变 0，装不上就下次再来。
+            // post 出去避免在遍历 View 树时 addView。
+            if (ENABLE_GLASS && "floating_app_bar_container".equals(id)
+                    && v.getWidth() > 0 && v.getHeight() > 0
+                    && !GlassToolbar.isInstalled()) {
                 final View decor = v.getRootView();
                 final View toolbar = v;
                 decor.post(new Runnable() {
