@@ -19,9 +19,8 @@ import java.util.Set;
  * 用 Kyant0/AndroidLiquidGlass 同款 shader 做玻璃高光与边缘折射，
  * 保持触摸穿透让原按钮照常工作。
  *
- * 安装时机由 HookMain 轮询重试：ComposeView 的尺寸在 Fragment 切换时会短暂变 0，
- * 一次失败不能放弃。按钮常显（顶部三个位置在主页也有原生按钮容器，不突兀）。
- * 坐标按 1440x3168 基线等比缩放。
+ * 坐标与尺寸由 HookMain 在扫描到工具栏那一刻快照后传入：
+ * ComposeView 的尺寸会在下一帧抖动，install 里再去读 getWidth() 会拿到 0。
  */
 public class GlassToolbar {
 
@@ -30,18 +29,27 @@ public class GlassToolbar {
     private static final List<GlassButtonView> BUTTONS = new ArrayList<>();
 
     private final View mDecor;
-    private final View mToolbar;
+    private final int mToolX;
+    private final int mToolY;
+    private final int mToolW;
+    private final int mToolH;
 
     static boolean isInstalled() {
         return !BUTTONS.isEmpty();
     }
 
-    static void install(View decor, View toolbar) {
+    static void install(View decor, int toolX, int toolY, int toolW, int toolH) {
+        Log.d(TAG, "glass install enter " + toolW + "x" + toolH
+                + " installed=" + isInstalled());
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             Log.d(TAG, "glass skipped: need API 33+, got " + Build.VERSION.SDK_INT);
             return;
         }
-        if (isInstalled() || !(decor instanceof ViewGroup) || toolbar.getWidth() <= 0) {
+        if (isInstalled()) {
+            return;
+        }
+        if (!(decor instanceof ViewGroup) || toolW <= 0 || toolH <= 0) {
+            Log.d(TAG, "glass abort: bad bounds or decor not ViewGroup");
             return;
         }
         int key = System.identityHashCode(decor);
@@ -51,7 +59,7 @@ public class GlassToolbar {
             }
         }
         try {
-            new GlassToolbar(decor, toolbar).start();
+            new GlassToolbar(decor, toolX, toolY, toolW, toolH).start();
             Log.d(TAG, "glass installed: 3 buttons on floating toolbar");
         } catch (Throwable t) {
             synchronized (INSTALLED) {
@@ -61,33 +69,30 @@ public class GlassToolbar {
         }
     }
 
-    private GlassToolbar(View decor, View toolbar) {
+    private GlassToolbar(View decor, int toolX, int toolY, int toolW, int toolH) {
         mDecor = decor;
-        mToolbar = toolbar;
+        mToolX = toolX;
+        mToolY = toolY;
+        mToolW = toolW;
+        mToolH = toolH;
     }
 
     private void start() {
-        int[] loc = new int[2];
-        mToolbar.getLocationOnScreen(loc);
-        int toolX = loc[0];
-        int toolY = loc[1];
-        int toolW = mToolbar.getWidth();
-        int toolH = mToolbar.getHeight();
-        float scale = toolW / 1440f;
+        float scale = mToolW / 1440f;
 
         // evidence/inventory.md：返回 [20,192][212,384]、分享 [1028,192][1220,384]、
         // 更多选项 [1228,192][1420,384]，容器 [0,0][1440,416]
-        addButton(toolX, toolY, 20 * scale, 192 * scale, 192 * scale);
-        addButton(toolX, toolY, 1028 * scale, 192 * scale, 192 * scale);
-        addButton(toolX, toolY, 1228 * scale, 192 * scale, 192 * scale);
+        addButton(20 * scale, 192 * scale, 192 * scale);
+        addButton(1028 * scale, 192 * scale, 192 * scale);
+        addButton(1228 * scale, 192 * scale, 192 * scale);
 
-        Log.d(TAG, "glass bounds: toolbar=" + toolX + "," + toolY
-                + " " + toolW + "x" + toolH + " scale=" + scale);
+        Log.d(TAG, "glass bounds: toolbar=" + mToolX + "," + mToolY
+                + " " + mToolW + "x" + mToolH + " scale=" + scale);
     }
 
-    private void addButton(int toolX, int toolY, float rx, float ry, float size) {
-        int x = toolX + (int) rx;
-        int y = toolY + (int) ry;
+    private void addButton(float rx, float ry, float size) {
+        int x = mToolX + (int) rx;
+        int y = mToolY + (int) ry;
         int sz = Math.max(1, (int) size);
         GlassButtonView v = new GlassButtonView(mDecor.getContext());
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(sz, sz);

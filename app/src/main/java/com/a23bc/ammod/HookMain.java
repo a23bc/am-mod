@@ -184,12 +184,17 @@ public class HookMain implements IXposedHookLoadPackage {
             if (ENABLE_GLASS && "floating_app_bar_container".equals(id)
                     && v.getWidth() > 0 && v.getHeight() > 0
                     && !GlassToolbar.isInstalled()) {
+                // 当场快照坐标/尺寸：ComposeView 在下一帧可能把尺寸改回 0。
+                int[] lc = location(v);
+                final int tx = lc[0];
+                final int ty = lc[1];
+                final int tw = v.getWidth();
+                final int th = v.getHeight();
                 final View decor = v.getRootView();
-                final View toolbar = v;
                 decor.post(new Runnable() {
                     @Override
                     public void run() {
-                        GlassToolbar.install(decor, toolbar);
+                        GlassToolbar.install(decor, tx, ty, tw, th);
                     }
                 });
             }
