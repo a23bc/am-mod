@@ -178,9 +178,10 @@ public class HookMain implements IXposedHookLoadPackage {
 
         // 这些 id 只出现在带顶部工具栏（返回 / 分享 / 更多选项）的页面：
         // 歌单详情、全屏播放页。主页没有，用它控制玻璃层显隐。
-        if ("collection_header_artist".equals(id) || "button_play".equals(id)
+        // isShown() 过滤后台隐藏的播放页 View；否则冷启动后主页会被误判成有返回按钮。
+        if (v.isShown() && ("collection_header_artist".equals(id) || "button_play".equals(id)
                 || "play_pause".equals(id) || "player_controls".equals(id)
-                || "menu_action_button".equals(id)) {
+                || "menu_action_button".equals(id))) {
             sPageHasToolbar = true;
         }
 
