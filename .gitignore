@@ -11,3 +11,9 @@ logs/*.log
 logs/ui-*.xml
 screenshots/*.png
 screenshots/*.jpg
+
+# 项目工作记录/记忆，不入库
+.workbuddy/
+
+# CI 产物不入库
+tools/artifacts/

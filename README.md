@@ -56,7 +56,7 @@
 git push origin main
 gh run watch
 
-# 2) 取 APK 并装机（或去 Actions 页面手动下载 am-mod-debug）
+# 2) 取 APK 并装机（若 gh 报 EOF，见 §5 的 HTTP/1.1 fallback）
 gh run download --name am-mod-debug --dir tools/artifacts
 adb install -r tools/artifacts/app-debug.apk
 ```
@@ -85,6 +85,26 @@ adb logcat -s AMMod:D
 | 三者都有 | 闭环成立，可以开始写真正想改的效果 |
 
 日志统一进 `logs/`，截图统一进 `screenshots/`，两者都不入库；`evidence/` 里的基线 XML 入库。
+
+### 当前验证进度（2026-11-15）
+
+| 环节 | 状态 | 判据 |
+| --- | --- | --- |
+| CI 编译 | ✅ 通过 | run `43704216473`，1m9s，`assembleDebug` + `upload-artifact` 全绿 |
+| Xposed API 82 解析 | ✅ 通过 | CI 编译成功，说明 `compileOnly` 坐标拉到了 |
+| APK 落本机 | ✅ 通过 | `am-mod-debug` 7116 bytes，内含 `app-debug.apk` |
+| 装机 | ✅ 通过 | `adb install -r` → `Success`；`pm path com.a23bc.ammod` 有输出 |
+| LSPosed 识别模块 | ✅ 通过 | `modules_config.db` 的 `modules` 表新增 `com.a23bc.ammod` 行，说明四个 `xposed*` meta-data 有效 |
+| **模块启用 / 作用域** | ⛔ **未做** | `modules_state` 与 `scope` 表都没有 `com.a23bc.ammod` 记录 |
+| hook 命中 | ⛔ 待验证 | 强停重开 Apple Music 后 `adb logcat -d -s AMMod:D` 为空，与上一条一致 |
+
+**结论：代码侧闭环已经走完，剩下的是设备侧一次人工启用**（LSPosed 管理器 → 模块 → 打开 AM Mod → 作用域勾 Apple Music → 强停 Apple Music 重开）。
+这步没做之前，日志为空是预期，不代表 hook 写错了。
+
+设备上还有其它在 hook Apple Music 的模块，改 UI 时注意别抢同一批 View：
+`org.francasio.sing`（AppleMusicSing，运行中，hook 歌词 RecyclerView / 音频）、
+`dev.a23bc.glass.extended`（未启用）、`com.a23bc.amviewdumper`（未启用）。
+LSPosed 版本 2.2.1，Android 17。
 
 ---
 
@@ -115,6 +135,22 @@ logs/ screenshots/ tools/artifacts/     日常产物（gitignore）
 - **Git Bash(MSYS) 会改写 `/sdcard/...`**：`adb shell uiautomator dump /sdcard/x.xml`
   这种写法会静默失败，必须写成 `adb shell "uiautomator dump /sdcard/x.xml"`。
   `tools/capture.sh` 已按这个写法固化。
+- **`gh` 取 artifact 报 EOF**：本机代理对 `api.github.com` 的 HTTP/2 连接不稳（`gh run list` 正常，
+  `run download` / artifacts 接口 EOF）；`curl --http1.1` 正常。可重跑的 fallback：
+
+```bash
+TOKEN=$(gh auth token); RUN_ID=43704216473
+ART_ID=$(curl -sS --http1.1 -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/a23bc/am-mod/actions/runs/$RUN_ID/artifacts" \
+  | python -c "import sys,json; print(json.load(sys.stdin)['artifacts'][0]['id'])")
+LOC=$(curl -sS --http1.1 -D - -o /dev/null -H "Authorization: Bearer $TOKEN" \
+  "https://api.github.com/repos/a23bc/am-mod/actions/artifacts/$ART_ID/zip" \
+  | tr -d '\r' | sed -n 's/^[Ll]ocation: //p' | head -1)
+curl -sS --http1.1 -L -o tools/artifacts/am-mod-debug.zip "$LOC"
+python -c "import zipfile; zipfile.ZipFile('tools/artifacts/am-mod-debug.zip').extractall('tools/artifacts')"
+```
+
+  注意 302 之后的 Azure Blob 请求**不能**再带 `Authorization`（预签名 URL 自带鉴权，双认证会被拒）。
 
 ---
 
