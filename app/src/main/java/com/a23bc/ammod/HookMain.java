@@ -21,11 +21,14 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * v0.3.0 —— 控件普查模式。
+ * v0.4.0 —— 控件普查 + 顶部工具栏液态玻璃预览。
  *
- * 用户要求：先拿到全部控件的位置，再决定怎么改；同时把 Compose 绘制的控件找全。
- * 因此本版**不做任何视觉改动**（APPLY_STYLE=false），只输出每个控件的
- * 真实 View 身份（id / 类名 / 屏幕绝对 bounds / clickable / content-desc）。
+ * 普查：只输出每个控件的真实 View 身份（id / 类名 / 屏幕绝对 bounds /
+ * clickable / content-desc），不改传统 View 控件（APPLY_STYLE=false）。
+ *
+ * 预览：返回 / 分享 / 更多选项是 Compose 绘制的，不是独立 View，
+ * 改不了属性；改为在 DecorView 上叠三个自绘 View，用 Kyant0/AndroidLiquidGlass
+ * 同款 AGSL shader 折射背后界面快照，触摸穿透保留原按钮行为。见 GlassToolbar。
  *
  * 三条触发路径互为兜底：
  *   1. ViewGroup.addView —— 新建 View；
@@ -41,11 +44,12 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "AMMod";
     private static final String TARGET = "com.apple.android.music";
-    private static final String VERSION = "v0.3.1";
+    private static final String VERSION = "v0.4.0";
 
     private static final boolean DUMP_CONTROLS = true;
-    // 普查阶段：先只拿清单和位置，不动界面。
+    // 传统 View 控件仍保持原样，先只做顶部三个按钮的玻璃预览。
     private static final boolean APPLY_STYLE = false;
+    private static final boolean ENABLE_GLASS = true;
     private static final long TICKER_MS = 1000L;
 
     private static final Set<String> EXCLUDED_PREFIX = new HashSet<>(Arrays.asList(
@@ -55,6 +59,7 @@ public class HookMain implements IXposedHookLoadPackage {
     private static final Set<Integer> SEEN = new HashSet<>();
     private static long sLastScan = 0L;
     private static boolean sTickerStarted = false;
+    private static boolean sGlassPosted = false;
 
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
@@ -178,6 +183,20 @@ public class HookMain implements IXposedHookLoadPackage {
                         + " abs=[" + lc[0] + "," + lc[1] + "]["
                         + (lc[0] + v.getWidth()) + "," + (lc[1] + v.getHeight()) + "]"
                         + " depth=" + depth);
+            }
+            // 工具栏有尺寸时才装玻璃层；post 出去避免在遍历 View 树时 addView。
+            if (ENABLE_GLASS && !sGlassPosted
+                    && "floating_app_bar_container".equals(id)
+                    && v.getWidth() > 0 && v.getHeight() > 0) {
+                sGlassPosted = true;
+                final View decor = v.getRootView();
+                final View toolbar = v;
+                decor.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        GlassToolbar.install(decor, toolbar);
+                    }
+                });
             }
             return;
         }
