@@ -14,20 +14,24 @@ adb shell "uiautomator dump /sdcard/am-window.xml" >/dev/null
 adb shell "cat /sdcard/am-window.xml" > "$OUT/ui-$STAMP.xml"
 adb logcat -d -s AMMod:D > "$OUT/amod-$STAMP.log"
 
-loaded=0; trees=0; hits=0; total=0
+loaded=0; ctrls=0; styles=0; compose=0; errors=0; total=0
 while IFS= read -r line; do
   total=$((total + 1))
   case "$line" in
-    *"module loaded"*)      loaded=$((loaded + 1)) ;;
-    *"view tree begin"*)    trees=$((trees + 1)) ;;
-    *"highlight "*"tinted"*) hits=$((hits + 1)) ;;
+    *"module loaded"*)     loaded=$((loaded + 1)) ;;
+    *"CTRL "*)             ctrls=$((ctrls + 1)) ;;
+    *"STYLE "*)            styles=$((styles + 1)) ;;
+    *"COMPOSE_TOOLBAR "*)  compose=$((compose + 1)) ;;
+    *"error "*)            errors=$((errors + 1)) ;;
   esac
 done < "$OUT/amod-$STAMP.log"
 
-echo "AMMod lines     : $total"
-echo "module loaded   : $loaded   (0 = 作用域/启用没生效)"
-echo "view tree dumps : $trees   (0 = onResume hook 没命中)"
-echo "highlight hits  : $hits    (0 = 资源 id 对不上)"
+echo "AMMod lines       : $total"
+echo "module loaded     : $loaded  (0 = 模块没启用 / 作用域没勾)"
+echo "control entries   : $ctrls  (0 = addView hook 没命中)"
+echo "styles applied    : $styles (0 = 没匹配到基础交互控件)"
+echo "compose toolbar   : $compose (顶部 Compose 工具栏出现次数)"
+echo "errors            : $errors (应为 0)"
 echo "wrote:"
 echo "  $OUT/ui-$STAMP.xml"
 echo "  $OUT/amod-$STAMP.log"

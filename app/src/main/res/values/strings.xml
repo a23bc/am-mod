@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AM Mod</string>
-    <string name="module_description">Apple Music UI hook scaffold (v0.1.0) — dumps the view tree and highlights mini player / bottom nav to prove the hook landed.</string>
+    <string name="module_description">Apple Music UI hook (v0.2.0) — targets basic interactive controls; excludes mini player and bottom nav.</string>
 </resources>
