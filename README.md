@@ -3,9 +3,8 @@
 **目标：给基础交互控件（返回、分享、更多、播放、收藏、三点菜单…）换样式。**
 明确排除 mini player 与底部导航。
 
-**当前阶段（v0.3.1）：控件普查，不改任何样式。**
-用户要求先拿到全部控件位置、并把 Compose 绘制的控件找全，再决定怎么改。
-所以 `HookMain.APPLY_STYLE = false`，界面保持原样；模块只输出控件身份与屏幕绝对坐标。
+**当前版本 v0.4.1**：传统 View 控件仍保持原样（`APPLY_STYLE=false`）；
+只给顶部 **返回 / 分享 / 更多选项** 三个 Compose 按钮做了液态玻璃预览，先给用户看效果。
 
 ---
 
@@ -13,17 +12,67 @@
 
 | 环节 | 状态 | 判据 |
 | --- | --- | --- |
-| CI 编译 | ✅ | 每次 push 的 build workflow 全绿 |
-| 装机 | ✅ | `adb install -r` → Success，`versionName=0.3.1` |
-| 模块启用 / 作用域 | ✅ | 用户已在 LSPosed 启用，`module loaded (v0.3.1)` |
-| 界面未被修改 | ✅ | 清空 logcat 后 `capture.sh`：`styles applied = 0` |
-| 真实 View 控件 + 绝对坐标 | ✅ | `CTRL` 行含 `abs=[x1,y1][x2,y2]`，`errors = 0` |
-| 全页面控件普查 | ✅ | `evidence/inventory.md` / `.json`：9 页、845 条、91 条 Compose 节点 |
-| **最终样式** | ⛔ 待定 | 用户明确说「先不改」 |
+| CI 编译 | ✅ | 最新 build workflow 全绿 |
+| 装机 | ✅ | `adb install -r` → Success，`versionName=0.4.1` |
+| 玻璃层安装 | ✅ | `glass install enter 1440x476` → `glass installed: 3 buttons` |
+| 视觉效果 | ✅ | `screenshots/glass-detail-final-20261115.png` |
+| **触摸穿透** | ✅ | 点返回按钮 `(116,288)` 后 `向上浏览。` 消失、回到主页（节点数 157→118） |
+| 界面其它部分 | ✅ 未改 | `capture.sh`：`styles applied = 0` |
+| 控件普查 | ✅ | `evidence/inventory.md` / `.json`：9 页、845 条、91 条 Compose 节点 |
+| 最终样式 | ⛔ 待定 | 等用户看效果后定 |
 
 ---
 
-## 1. 控件普查结果（核心交付）
+## 1. 液态玻璃预览（v0.4.1）
+
+### 能不能直接「用这个库」
+
+参考仓库 [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass)（`kmp` 分支，
+Apache-2.0，Maven `io.github.kyant0:backdrop:2.0.1`），是 **Compose Multiplatform** 库：
+核心是 `Backdrop` + `Modifier.drawBackdrop { vibrancy(); blur(); lens() }`，
+官方还提供 `rememberCanvasBackdrop(onDraw)` 可自定义背景。
+
+**直接集成到本模块不现实**，两条硬约束：
+
+1. 返回 / 分享 / 更多选项由 Apple Music 自己的 `ComposeView(floating_app_bar_container)` 绘制，
+   不是独立 View；我们没法把目标 App 的 Compose 树接进库的 `Backdrop`，也改不了它们的 Modifier。
+2. 模块要自带 Kotlin + Compose 运行时 + Compose compiler，还得在目标进程补
+   `LifecycleOwner` / `SavedStateRegistryOwner`；构建链复杂度、APK 体积、与 App 自带 Compose
+   的类冲突风险都明显上升。
+
+### 实际做法（仍然用库的样式）
+
+以**源码方式引用库同款 AGSL shader**（`BackdropShaders.java`，保留 Apache-2.0 版权头），
+在原生 View 层用 Android `RuntimeShader` / `RenderEffect` 复现：
+
+| 库的组件 | 本模块对应 |
+| --- | --- |
+| `RoundedRectRefractionShaderString` | `BackdropShaders.REFRACTION` → `RenderEffect.createRuntimeShaderEffect` |
+| `DefaultHighlightShaderString` | `BackdropShaders.HIGHLIGHT` → 仅描边高光 |
+| `LiquidButton`: `blur(2dp)` + `lens(12dp, 24dp)` | 同参数（预览把 blur 降到 1dp 让边缘更清晰） |
+| `Highlight.Default`: 白 0.5 / 45° / falloff 1 / width 0.5dp | 同角度与 falloff，预览把 width/alpha 放大 |
+| `BlendMode.Plus` | `Paint.setBlendMode(BlendMode.PLUS)` |
+
+`GlassToolbar` 在 DecorView 上按 `evidence/inventory.md` 的实测 bounds 叠三个
+`GlassButtonView`（返回 `[20,192][212,384]`、分享 `[1028,192][1220,384]`、
+更多选项 `[1228,192][1420,384]`，按工具栏宽度等比缩放）。
+三个 View 都 `setClickable(false)`、不设触摸监听，**事件穿透到下层原按钮**。
+
+### 诚实说明限制
+
+- 当前是**半透明玻璃罩**：折射的是玻璃自身的 tint / 描边，**没有折射背后的界面内容**。
+  原生 View 的 `RenderEffect` 只能处理自己绘制的内容，采不到下层 View 的像素。
+  要真正「透过玻璃看到被扭曲的背景」，需要上面说的完整 Compose 集成 +
+  `CanvasBackdrop` 喂入界面快照，或把背景快照做擦除后叠加。
+- 玻璃层目前**在所有页面常显**（主页顶部本来也有按钮容器，视觉不算突兀）。
+  之前尝试用 View 树特征 id 判断页面，实测不可靠：后台播放页的 View 一直在树里，
+  会把主页误判成有返回按钮；且 `setVisible` 早于 `install` 会让按钮永远停在 GONE。
+  已知行为，后续要用 accessibility 语义节点（`向上浏览。`）做判据才稳。
+- 只做了这三个按钮，其它基础控件仍是原样。
+
+---
+
+## 2. 控件普查结果
 
 ```bash
 bash tools/inventory.sh        # 遍历页面 + 逐页 dump + 汇总
@@ -32,97 +81,48 @@ bash tools/inventory.sh        # 遍历页面 + 逐页 dump + 汇总
 产出 `evidence/inventory.md`（人读表格）和 `evidence/inventory.json`（结构化）。
 坐标是**屏幕绝对像素** `[x1,y1][x2,y2]`，设备 1440x3168。
 
-### 覆盖的 9 个页面 / 状态
+**9 个页面 / 845 条控件记录 / 91 条 Compose 语义节点**：
+home、new、radio、library、search、detail、player、more_menu、home_before_detail。
 
-| 页面 | 节点 | ComposeView | Compose 语义控件 | 传统 View 控件 |
-| --- | --- | --- | --- | --- |
-| home | 116 | 3 | 5 | 98 |
-| new | 69 | 3 | 3 | 54 |
-| radio | 115 | 3 | 25 | 54 |
-| library | 112 | 3 | 30 | 54 |
-| search | 132 | 3 | 5 | 109 |
-| detail（歌单详情） | 154 | 3 | 9 | 131 |
-| player（全屏播放） | 149 | 3 | 9 | 125 |
-| more_menu（更多选项弹窗） | 42 | 0 | 0 | 31 |
-| home_before_detail | 116 | 3 | 5 | 98 |
+判定：accessibility 树里父链含 `androidx.compose.ui.platform.ComposeView` 即 Compose 绘制。
+四类容器：`floating_app_bar_container`（顶部工具栏 23 条）、`top_and_bottom_gradients`(8)、
+`dialogs_host`(8)、无 id ComposeView（广播/资料库列表 52 条）。
+返回按钮语义节点 `[68,240][164,336]`、可点击父区 `[20,192][212,384]`。
 
-### 所有 Compose 绘制的控件
+传统 View 侧去重后有 30 个基础控件（`play_pause`、`menu_action_button`、`button_play`、
+`list_favorite_icon`…），模块 `CTRL` 日志带绝对 bounds，是后续改样式的 hook 依据。
 
-判定：accessibility 树里父链含 `androidx.compose.ui.platform.ComposeView` 的节点。
-共 **91 条**，分布在 4 类容器：
-
-| 容器 | 说明 |
-| --- | --- |
-| `floating_app_bar_container` | **顶部工具栏**：返回 / 分享 / 更多选项，23 条 |
-| `top_and_bottom_gradients` | 上下渐变遮罩，8 条 |
-| `dialogs_host` | Compose 弹窗宿主，8 条 |
-| 无 id 的 ComposeView | 广播页 / 资料库页的 Compose 列表与分类 Tab，52 条 |
-
-顶部工具栏（详情页实测，`floating_app_bar_container` 容器 `[0,0][1440,416]`）：
-
-| 按钮 | 可点击区域 | 语义节点 | 容器 |
-| --- | --- | --- | --- |
-| 返回（`向上浏览。`） | `[20,192][212,384]` | `[68,240][164,336]` | `floating_app_bar_container` |
-| 分享 | `[1028,192][1220,384]` | `[1076,240][1172,336]` | 同上 |
-| 更多选项 | `[1228,192][1420,384]` | `[1268,232][1380,344]` | 同上 |
-
-> **作废声明**：v0.1.0 的「主界面是传统 View，不用跟 Compose 死磕」**部分作废**。
-> 内容区成立，但返回 / 分享 / 更多选项这类基础控件是 Compose 绘制的，
-> 不是独立 View 实例，不能靠 `findViewById` 或 `View.setBackground` 改。
-> 后续要改它们，得在 ComposeView 上按语义节点 bounds 叠自绘层并转发点击，或全局替换图标资源。
-
-### 传统 View 控件（模块侧 `CTRL` 日志，去重后 30 个基础控件）
-
-| 用途 | id |
-| --- | --- |
-| 播放控制 | `play_pause`、`previous_rewind`、`next_fast_forward`、`button_play`、`button_shuffle`、`button_action` |
-| 更多 / 菜单 | `list_left_icon`、`more`、`menu_action_button`、`bubble_tip_close`、`bubble_tip_symbol` |
-| 收藏 / 状态 | `list_favorite_icon`、`list_favorite_icon_status`、`shuffle_repeat_badge`、`badge_platter` |
-| 播放器辅助 | `player_lyrics`、`player_queue`、`media_route_button`、`vocal_ctrl`、`vocal_off`、`video_surface`、`audio_badge_icon`、`audio_badge_with_text` |
-| 图形 / 其它 | `thumbnail`、`lyrics_thumbnail_container`、`collection_header_artist`、`button_icon`、`icon_search`、`image_view` |
-
-`uiautomator dump`（accessibility 树）与模块 `CTRL`（真实 View 树）互补：
-改样式时以模块日志的 `id=` 为 hook 依据，Compose 那批以 inventory 的 bounds 为依据。
-
-### 采集边界（诚实说明）
-
-- accessibility 树只覆盖**遍历到的页面 + 当时可见且已渲染的节点**；
-  `mergeDescendants` 折叠的 Composable 会被合并成一个节点，看不到更细的内部结构。
-- 设置页、歌曲长按菜单、横屏、深色模式、滚动后的列表项**未采**，需要时改
-  `tools/inventory.sh` 里的页面序列再跑一遍。
-- 所以「所有 Compose 绘制的控件」= **当前这 9 个页面里 accessibility 暴露出来的全部**，
-  不是 APK 里静态的全部 Composable。要静态全量得反编译 APK 另行统计。
+**采集边界**：只覆盖这 9 页里当时可见、已渲染的节点；`mergeDescendants` 折叠的
+Composable 看不到内部；设置页、长按菜单、横屏、深色模式、滚动后列表项未采。
 
 ---
 
-## 2. 原理
+## 3. 原理
 
 1. LSPosed 把模块 APK 注入**指定 App 的进程**，不用改 Apple Music 的 APK。
 2. 入口是 `assets/xposed_init` 里的类名，LSPosed 回调 `handleLoadPackage`；
    只在 `lpparam.packageName == com.apple.android.music` 时动手。
 3. 三条触发路径互为兜底：`ViewGroup.addView`（新建 View）、`Activity.onResume`（冷启动）、
-   1s 轮询 `DecorView`（Fragment 切换复用旧 View）。`SEEN` 去重，不重复输出、不刷 logcat。
+   1s 轮询 `DecorView`（Fragment 切换复用旧 View）。`SEEN` 去重，不刷 logcat。
 
 `compileOnly` 是关键：Xposed API 由 LSPosed 运行时提供，**不能**打进 APK。
 
 ---
 
-## 3. 设备实测（PJZ110）
+## 4. 设备实测（PJZ110）
 
 | 项 | 结果 | 判据 |
 | --- | --- | --- |
 | Android | 17 | `adb shell getprop ro.build.version.release` |
 | Apple Music | `7.0.0` / versionCode `1614` / targetSdk 36 | `adb shell "dumpsys package com.apple.android.music \| grep versionName"` |
-| 包名 / 入口 | `com.apple.android.music` / `.common.MainActivity` | `adb shell pm list packages apple` |
-| Root | KernelSU (`u:r:ksu:s0`) | `adb shell "su -c id"` |
-| LSPosed | 2.2.1 + `zygisk_lsposed` | `adb shell pm list packages lsposed` |
+| Root / LSPosed | KernelSU / 2.2.1 + `zygisk_lsposed` | `adb shell "su -c id"`、`adb shell pm list packages lsposed` |
 
 共存模块：`org.francasio.sing`（AppleMusicSing，运行中）、`dev.a23bc.glass.extended`、
-`com.a23bc.amviewdumper`（后两个未启用）。改同一批 View 时注意冲突。
+`com.a23bc.amviewdumper`（后两个未启用）。
 
 ---
 
-## 4. 常用命令
+## 5. 常用命令
 
 ```bash
 # 编译（本机不跑 Gradle）
@@ -135,61 +135,56 @@ adb logcat -c && bash tools/capture.sh
 
 # 全页面控件普查
 bash tools/inventory.sh
+
+# 截图
+adb exec-out screencap -p > screenshots/glass-detail.png
 ```
 
-`capture.sh` 指标：`module loaded` / `control entries` / `styles applied`（普查模式应为 0）/
-`compose views` / `errors`（应为 0）。
-
-LSPosed 装完或更新 APK 后，务必**强停 Apple Music 重开**才会注入新代码；
-抓日志前先 `adb logcat -c`，否则会混进旧版本的累积日志。
-
-日志进 `logs/`，截图进 `screenshots/`，基线证据进 `evidence/`，APK 进 `tools/artifacts/`。
-`logs/*.log`、`logs/ui-*.xml`、`logs/inv-*.xml`、截图和 APK 都不入库；`evidence/` 入库。
+更新 APK 后务必**强停 Apple Music 重开**才会注入新代码；抓日志前先 `adb logcat -c`，
+否则会混进旧版本的累积日志。
 
 ---
 
-## 5. 目录
+## 6. 目录
 
 ```
-app/src/main/java/.../HookMain.java      三条触发路径 / 控件筛选 / 绝对坐标输出
-app/src/main/assets/xposed_init          模块入口类名
-app/src/main/AndroidManifest.xml         四个 xposed* meta-data + 推荐作用域
-.github/workflows/build.yml              CI：JDK 17 + Gradle 8.7 + AGP 8.6.1
-tools/capture.sh                         抓界面 XML + AMMod 日志并统计
-tools/fetch-artifact.sh                  取 CI 产物（绕开本机 HTTP/2 问题）
-tools/inventory.sh                       遍历页面并逐页 dump
-tools/inventory.py                       汇总成 inventory.md / inventory.json
-evidence/inventory.md                    控件位置清单（人读）
-evidence/inventory.json                   控件位置清单（结构化）
-evidence/ui-dump-2026-11-15.xml          主页基线
-evidence/ui-detail-2026-11-15.xml        详情页基线（含 Compose 工具栏父链）
+app/src/main/java/.../HookMain.java        三条触发路径 / 控件筛选 / 玻璃层安装
+app/src/main/java/.../BackdropShaders.java 库同款 AGSL shader（Apache-2.0，含来源）
+app/src/main/java/.../GlassToolbar.java    三个玻璃按钮的定位与安装
+app/src/main/java/.../GlassButtonView.java 玻璃绘制 + RenderEffect
+app/src/main/assets/xposed_init            模块入口类名
+.github/workflows/build.yml                CI：JDK 17 + Gradle 8.7 + AGP 8.6.1
+tools/capture.sh | fetch-artifact.sh      抓日志 / 取 CI 产物
+tools/inventory.sh | inventory.py         全页面控件普查
+evidence/inventory.md | .json             控件位置清单
+screenshots/glass-*-20261115.png          各轮效果对照
 ```
 
 ---
 
-## 6. 已排除的坑
+## 7. 已排除的坑
 
-- **本机 `curl` 访问 `api.xposed.info` / `repo1.maven.org` 报 schannel TLS 握手失败**
-  （`github.com` 正常）。本机代理限制，不影响 Actions；`settings.gradle` 配了官方仓库 + 阿里云兜底。
-- **`gh` 取 artifact 报 EOF**：本机代理对 `api.github.com` 的 HTTP/2 连接不稳。
-  `tools/fetch-artifact.sh` 用 `curl --http1.1`：查 artifact id → 取 302 预签名地址 →
-  裸 URL 下载（**不能**带 `Authorization`，双认证会被 Azure 拒）。
-- **Git Bash(MSYS) 改写 `/sdcard/...`**：`adb shell uiautomator dump /sdcard/x.xml` 会静默失败，
-  必须写成 `adb shell "uiautomator dump /sdcard/x.xml"`。
-- **Windows python 不认 `/tmp/...`**：脚本用 `cygpath -m` 转成 `E:/...`。
-  `core.autocrlf=true` 会把 shell 脚本转 CRLF，`.gitattributes` 已强制 `*.sh` 用 LF。
-- **`ClassNotFoundException: androidx.fragment.app.Fragment`**：Apple Music 重打包了 AndroidX，
-  hook Fragment 这条路作废，改用 DecorView 轮询。
-- **v0.1.0 的 View 树 walk 中途断掉**：单个异常节点打断整棵树，现已逐节点 try/catch。
-- **v0.3.0 的 `COMPOSE_VIEW` 每次轮询重复输出**（一次抓到 1330 条）：已按 identityHashCode 去重。
-- **累积 logcat 会混进旧版本日志**：更新 APK 后必须 `adb logcat -c` 再抓，否则
-  `styles applied` 等指标会把上一版算进来。
+- **本机 `curl` 访问 `api.xposed.info` / `repo1.maven.org` TLS 握手失败**（`github.com` 正常）。
+  本机代理限制，不影响 Actions；`settings.gradle` 配了官方仓库 + 阿里云兜底。
+- **`gh` 取 artifact 报 EOF**：本机代理对 `api.github.com` 的 HTTP/2 不稳。
+  `tools/fetch-artifact.sh` 用 `curl --http1.1` 走 302 预签名地址（**不能**再带
+  `Authorization`，双认证会被 Azure 拒）。
+- **Git Bash(MSYS) 改写 `/sdcard/...`**：整条 adb shell 命令必须放在引号里。
+- **Windows python 不认 `/tmp/...`**：脚本用 `cygpath -m`；`.gitattributes` 强制 `*.sh` 用 LF。
+- **`ClassNotFoundException: androidx.fragment.app.Fragment`**：Apple Music 重打包了 AndroidX。
+- **`android.annotation.RequiresApi` 不存在**（要 AndroidX 注解）、`PorterDuff.Mode.PLUS` 不存在
+  （Compose 的 `BlendMode.Plus` 对应原生 `BlendMode.PLUS`）—— 两个 CI 编译错误。
+- **ComposeView 尺寸在下一帧抖动**：`decor.post` 里再读 `toolbar.getWidth()` 会拿到 0，
+  导致玻璃层静默装不上；改为扫描时快照坐标/尺寸再传入。
+- **页面显隐判据不可靠**：后台播放页 View 一直在 View 树里；已放弃 id 启发式，改常显。
+- **首版不透明快照 + 填充式高光**会变成三个银色金属纽扣；改为半透明玻璃罩 + 仅描边高光。
 
 ---
 
-## 7. 下一步（等用户定方向）
+## 8. 下一步（等用户看效果后定）
 
-1. 用 `evidence/inventory.md` 挑出要改的控件，指定最终样式，再打开 `APPLY_STYLE`
-   并改写 `HookMain.applyStyle()`。
-2. 顶部 Compose 工具栏（返回 / 分享 / 更多选项）需要另一套做法，不能靠 View 属性。
-3. 若某类控件没采到，先扩展 `tools/inventory.sh` 的页面序列补采，别靠猜坐标。
+1. 效果方向：玻璃要更透 / 更亮 / 带色散折射 / 换成胶囊形，还是回到克制风格；
+   改 `GlassButtonView.configure()` 的参数即可。
+2. 要不要推广到其它基础控件（30 个传统 View 控件可直接 `APPLY_STYLE`）与其余 Compose 控件。
+3. 要不要做完整 Compose 集成（真正折射背后内容），代价见 §1。
+4. 要不要用 accessibility 语义节点做精确的页面显隐。
