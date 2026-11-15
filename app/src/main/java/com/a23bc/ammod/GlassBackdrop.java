@@ -23,7 +23,7 @@ import java.util.List;
 public class GlassBackdrop {
 
     private static final String TAG = "AMMod";
-    private static final int DOWNSCALE = 28;
+    private static final int DOWNSCALE = 4;
 
     private final View mDecor;
     private final List<View> mOverlays;
@@ -68,17 +68,8 @@ public class GlassBackdrop {
             setOverlaysVisible(true);
         }
 
-        // 全图快速模糊：缩小再放大，用于把原按钮区域抹掉
-        Canvas sc = new Canvas(mSmall);
-        sc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-        sc.drawBitmap(mRaw, null,
-                new Rect(0, 0, mSmall.getWidth(), mSmall.getHeight()), mFilter);
-        Canvas bc = new Canvas(mBlurred);
-        bc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-        bc.drawBitmap(mSmall, null, new Rect(0, 0, mW, mH), mFilter);
-
-        // 干净背景 = 原图；三个按钮区域用「正上方同尺寸的干净背景」贴补。
-        // 用模糊版仍会留下原生方形按钮的色块轮廓，贴补才能真正把整个按钮抹掉。
+        // 干净背景 = 原图；三个按钮区域用「正上方同尺寸的干净背景」贴补，
+        // 这样才能把原生方形按钮（含图标）整个抹掉，而不是留下模糊色块。
         Canvas cc = new Canvas(mClean);
         cc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
         cc.drawBitmap(mRaw, 0f, 0f, null);
@@ -88,7 +79,17 @@ public class GlassBackdrop {
             Rect src = new Rect(r.left, 0, Math.min(mW, r.left + bw), Math.min(mH, bh));
             cc.drawBitmap(mRaw, src, r, null);
         }
-        return mClean;
+
+        // 整块背景轻度模糊：消掉贴补产生的方形硬接缝，
+        // 同时让 cover 看起来像「玻璃后面的背景」而不是清晰的截图。
+        Canvas sc = new Canvas(mSmall);
+        sc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+        sc.drawBitmap(mClean, null,
+                new Rect(0, 0, mSmall.getWidth(), mSmall.getHeight()), mFilter);
+        Canvas bc = new Canvas(mBlurred);
+        bc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+        bc.drawBitmap(mSmall, null, new Rect(0, 0, mW, mH), mFilter);
+        return mBlurred;
     }
 
     private void setOverlaysVisible(boolean visible) {
