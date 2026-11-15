@@ -41,7 +41,7 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "AMMod";
     private static final String TARGET = "com.apple.android.music";
-    private static final String VERSION = "v0.4.1";
+    private static final String VERSION = "v0.5.0";
 
     private static final boolean DUMP_CONTROLS = true;
     // 传统 View 控件仍保持原样，先只做顶部三个按钮的玻璃预览。

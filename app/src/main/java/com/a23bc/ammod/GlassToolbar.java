@@ -1,6 +1,12 @@
 package com.a23bc.ammod;
 
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Rect;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
@@ -12,40 +18,33 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 顶部 Compose 工具栏的液态玻璃叠加层。
+ * 把顶部工具栏的返回 / 分享 / 更多选项**整体替换**成液态玻璃按钮。
  *
- * 返回 / 分享 / 更多选项不是独立 View，改不了属性；
- * 所以在 DecorView 上按 evidence/inventory.md 的实测 bounds 叠三个自绘 View，
- * 用 Kyant0/AndroidLiquidGlass 同款 shader 做玻璃高光与边缘折射，
- * 保持触摸穿透让原按钮照常工作。
+ * 布局（全部挂在 DecorView 上）：
+ *   - CoverView：覆盖整个工具栏区域，画「干净背景」快照，盖掉原生按钮；
+ *   - 三个 GlassButtonView：各自以同一块真实背景为 content，用库同款折射 shader
+ *     做边缘折射，叠玻璃表面，并重画图标。
  *
- * 坐标与尺寸由 HookMain 在扫描到工具栏那一刻快照后传入：
- * ComposeView 的尺寸会在下一帧抖动，install 里再去读 getWidth() 会拿到 0。
+ * 所有 View 都不 clickable，触摸事件穿透到下层原按钮，功能不变。
+ * 快照每 500ms 刷新一次，让玻璃里的背景跟随界面变化。
  */
 public class GlassToolbar {
 
     private static final String TAG = "AMMod";
+    private static final long REFRESH_MS = 500L;
     private static final Set<Integer> INSTALLED = new HashSet<>();
-    private static final List<GlassButtonView> BUTTONS = new ArrayList<>();
 
     private final View mDecor;
-    private final int mToolX;
-    private final int mToolY;
-    private final int mToolW;
-    private final int mToolH;
-
-    static boolean isInstalled() {
-        return !BUTTONS.isEmpty();
-    }
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
+    private final List<View> mOverlays = new ArrayList<>();
+    private final List<GlassButtonView> mButtons = new ArrayList<>();
+    private final CoverView mCover;
+    private GlassBackdrop mBackdrop;
 
     static void install(View decor, int toolX, int toolY, int toolW, int toolH) {
-        Log.d(TAG, "glass install enter " + toolW + "x" + toolH
-                + " installed=" + isInstalled());
+        Log.d(TAG, "glass install enter " + toolW + "x" + toolH);
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            Log.d(TAG, "glass skipped: need API 33+, got " + Build.VERSION.SDK_INT);
-            return;
-        }
-        if (isInstalled()) {
+            Log.d(TAG, "glass skipped: need API 33+");
             return;
         }
         if (!(decor instanceof ViewGroup) || toolW <= 0 || toolH <= 0) {
@@ -60,7 +59,7 @@ public class GlassToolbar {
         }
         try {
             new GlassToolbar(decor, toolX, toolY, toolW, toolH).start();
-            Log.d(TAG, "glass installed: 3 buttons on floating toolbar");
+            Log.d(TAG, "glass installed: 3 full replacement buttons");
         } catch (Throwable t) {
             synchronized (INSTALLED) {
                 INSTALLED.remove(key);
@@ -71,36 +70,83 @@ public class GlassToolbar {
 
     private GlassToolbar(View decor, int toolX, int toolY, int toolW, int toolH) {
         mDecor = decor;
-        mToolX = toolX;
-        mToolY = toolY;
-        mToolW = toolW;
-        mToolH = toolH;
+        float scale = toolW / 1440f;
+        float density = decor.getResources().getDisplayMetrics().density;
+
+        mCover = new CoverView(decor.getContext());
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(toolW, toolH);
+        clp.leftMargin = toolX;
+        clp.topMargin = toolY;
+        ((ViewGroup) decor).addView(mCover, clp);
+        mOverlays.add(mCover);
+
+        int[][] specs = {
+                {20, 192, GlassButtonView.TYPE_BACK},
+                {1028, 192, GlassButtonView.TYPE_SHARE},
+                {1228, 192, GlassButtonView.TYPE_MORE},
+        };
+        Rect[] rects = new Rect[specs.length];
+        for (int i = 0; i < specs.length; i++) {
+            float rx = specs[i][0] * scale;
+            float ry = specs[i][1] * scale;
+            float size = 192 * scale;
+            int sz = Math.max(1, (int) size);
+            GlassButtonView v = new GlassButtonView(decor.getContext());
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(sz, sz);
+            lp.leftMargin = toolX + (int) rx;
+            lp.topMargin = toolY + (int) ry;
+            ((ViewGroup) decor).addView(v, lp);
+            v.configure(sz, sz, density, specs[i][2], (int) rx, (int) ry);
+            v.bringToFront();
+            mButtons.add(v);
+            mOverlays.add(v);
+            rects[i] = new Rect((int) rx, (int) ry, (int) (rx + size), (int) (ry + size));
+        }
+
+        mBackdrop = new GlassBackdrop(decor, mOverlays, toolX, toolY, toolW, toolH, rects);
     }
 
     private void start() {
-        float scale = mToolW / 1440f;
-
-        // evidence/inventory.md：返回 [20,192][212,384]、分享 [1028,192][1220,384]、
-        // 更多选项 [1228,192][1420,384]，容器 [0,0][1440,416]
-        addButton(20 * scale, 192 * scale, 192 * scale);
-        addButton(1028 * scale, 192 * scale, 192 * scale);
-        addButton(1228 * scale, 192 * scale, 192 * scale);
-
-        Log.d(TAG, "glass bounds: toolbar=" + mToolX + "," + mToolY
-                + " " + mToolW + "x" + mToolH + " scale=" + scale);
+        refresh();
+        mHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                refresh();
+                mHandler.postDelayed(this, REFRESH_MS);
+            }
+        }, REFRESH_MS);
     }
 
-    private void addButton(float rx, float ry, float size) {
-        int x = mToolX + (int) rx;
-        int y = mToolY + (int) ry;
-        int sz = Math.max(1, (int) size);
-        GlassButtonView v = new GlassButtonView(mDecor.getContext());
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(sz, sz);
-        lp.leftMargin = x;
-        lp.topMargin = y;
-        ((ViewGroup) mDecor).addView(v, lp);
-        v.configure(sz, sz, mDecor.getResources().getDisplayMetrics().density);
-        v.bringToFront();
-        BUTTONS.add(v);
+    private void refresh() {
+        Bitmap b = mBackdrop.capture();
+        mCover.setBackdrop(b);
+        mCover.invalidate();
+        for (GlassButtonView v : mButtons) {
+            v.setBackdrop(b);
+            v.invalidate();
+        }
+    }
+
+    /** 不透明背景层：盖住原生按钮，让新按钮成为唯一的按钮。 */
+    private static final class CoverView extends View {
+        private Bitmap mBackdrop;
+
+        CoverView(Context context) {
+            super(context);
+            setClickable(false);
+            setFocusable(false);
+        }
+
+        void setBackdrop(Bitmap b) {
+            mBackdrop = b;
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            if (mBackdrop != null && !mBackdrop.isRecycled()) {
+                canvas.drawBitmap(mBackdrop, 0f, 0f, null);
+            }
+        }
     }
 }
