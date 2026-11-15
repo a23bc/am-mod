@@ -1,13 +1,11 @@
 package com.a23bc.ammod;
 
-import android.annotation.RequiresApi;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BlendMode;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.RenderEffect;
@@ -22,8 +20,8 @@ import android.view.View;
  * 整层再套 RenderEffect：先 blur(2dp)，再用库的 RoundedRectRefraction shader 做边缘折射。
  *
  * 触摸穿透：不 clickable、不设置 OnTouchListener，事件会继续派发给下层原按钮。
+ * 本类的 API 33+ 调用由 GlassToolbar.install() 的 SDK_INT 判断保护。
  */
-@RequiresApi(33)
 public class GlassButtonView extends View {
 
     private final Paint mTint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -43,7 +41,8 @@ public class GlassButtonView extends View {
         setFocusable(false);
         // LiquidButton: onDrawSurface 会叠一层半透明 surface
         mTint.setColor(Color.argb(34, 255, 255, 255));
-        mHighlight.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.PLUS));
+        // Highlight.Default 的 blendMode = BlendMode.Plus
+        mHighlight.setBlendMode(BlendMode.PLUS);
     }
 
     void configure(int w, int h, float density) {

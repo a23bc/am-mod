@@ -1,6 +1,5 @@
 package com.a23bc.ammod;
 
-import android.annotation.RequiresApi;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -26,7 +25,6 @@ import java.util.Set;
  *
  * 按钮坐标按 1440x3168 基线等比缩放（基准来自真机 uiautomator dump）。
  */
-@RequiresApi(33)
 public class GlassToolbar {
 
     private static final String TAG = "AMMod";
