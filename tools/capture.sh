@@ -21,7 +21,7 @@ while IFS= read -r line; do
     *"module loaded"*)     loaded=$((loaded + 1)) ;;
     *"CTRL "*)             ctrls=$((ctrls + 1)) ;;
     *"STYLE "*)            styles=$((styles + 1)) ;;
-    *"COMPOSE_TOOLBAR "*)  compose=$((compose + 1)) ;;
+    *"COMPOSE_VIEW "*)     compose=$((compose + 1)) ;;
     *"error "*)            errors=$((errors + 1)) ;;
   esac
 done < "$OUT/amod-$STAMP.log"
@@ -29,8 +29,8 @@ done < "$OUT/amod-$STAMP.log"
 echo "AMMod lines       : $total"
 echo "module loaded     : $loaded  (0 = 模块没启用 / 作用域没勾)"
 echo "control entries   : $ctrls  (0 = addView hook 没命中)"
-echo "styles applied    : $styles (0 = 没匹配到基础交互控件)"
-echo "compose toolbar   : $compose (顶部 Compose 工具栏出现次数)"
+echo "styles applied    : $styles (v0.3.0 普查模式应为 0)"
+echo "compose views     : $compose (模块侧看到的 Compose 容器次数)"
 echo "errors            : $errors (应为 0)"
 echo "wrote:"
 echo "  $OUT/ui-$STAMP.xml"

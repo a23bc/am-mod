@@ -21,31 +21,31 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * v0.2.2 —— 基础交互控件版。
+ * v0.3.0 —— 控件普查模式。
  *
- * 目标：跨页面覆盖「返回、分享、更多、播放、收藏、三点菜单」这类基础交互控件，
- * 明确排除 mini player 与底部导航。
+ * 用户要求：先拿到全部控件的位置，再决定怎么改；同时把 Compose 绘制的控件找全。
+ * 因此本版**不做任何视觉改动**（APPLY_STYLE=false），只输出每个控件的
+ * 真实 View 身份（id / 类名 / 屏幕绝对 bounds / clickable / content-desc）。
  *
- * 三条触发路径，互为兜底：
- *   1. ViewGroup.addView —— 新建 View（含列表滚动、弹窗）；
- *   2. Activity.onResume —— 冷启动时整棵树扫一次；
- *   3. 1s 轮询 DecorView —— Fragment 切换常复用旧 View（不再 addView），
- *      而 Apple Music 把 AndroidX Fragment 类重打包了，实测
- *      ClassNotFoundException: androidx.fragment.app.Fragment，没法 hook 它。
- *      轮询是明知粗糙但可验证的兜底，靠 SEEN 去重保证不重复动手。
+ * 三条触发路径互为兜底：
+ *   1. ViewGroup.addView —— 新建 View；
+ *   2. Activity.onResume —— 冷启动整棵树；
+ *   3. 1s 轮询 DecorView —— Fragment 切换复用旧 View（不再 addView）。
+ *      Apple Music 重打包了 AndroidX，实测找不到 androidx.fragment.app.Fragment，
+ *      没法 hook Fragment，所以保留这个粗糙但可验证的轮询。
  *
- * 已知边界：顶部工具栏的返回/分享/更多按钮由 ComposeView
- * (floating_app_bar_container) 绘制，不是独立 View，本版只能标记容器，
- * 改不到它们的视觉样式。详见 README。
+ * Compose 语义节点不是独立 View，模块里的 View 树拿不到它们；
+ * 那部分由外部 `tools/inventory.sh` 走 accessibility 树采集（见 README）。
  */
 public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "AMMod";
     private static final String TARGET = "com.apple.android.music";
-    private static final String VERSION = "v0.2.2";
+    private static final String VERSION = "v0.3.0";
 
     private static final boolean DUMP_CONTROLS = true;
-    private static final boolean APPLY_STYLE = true;
+    // 普查阶段：先只拿清单和位置，不动界面。
+    private static final boolean APPLY_STYLE = false;
     private static final long TICKER_MS = 1000L;
 
     private static final Set<String> EXCLUDED_PREFIX = new HashSet<>(Arrays.asList(
@@ -167,16 +167,24 @@ public class HookMain implements IXposedHookLoadPackage {
             return;
         }
 
-        if ("floating_app_bar_container".equals(id)) {
-            log("COMPOSE_TOOLBAR " + v.getClass().getName()
-                    + " size=" + v.getWidth() + "x" + v.getHeight()
+        // Compose 容器单独标记：内部按钮不是独立 View，模块侧只能记录容器位置。
+        if (v.getClass().getName().contains("compose.ui.platform")
+                || "floating_app_bar_container".equals(id)) {
+            int[] lc = location(v);
+            log("COMPOSE_VIEW " + v.getClass().getName()
+                    + " id=" + id
+                    + " abs=[" + lc[0] + "," + lc[1] + "]["
+                    + (lc[0] + v.getWidth()) + "," + (lc[1] + v.getHeight()) + "]"
                     + " depth=" + depth);
             return;
         }
 
         boolean clickable = v.isClickable() || v.isLongClickable();
         boolean imageLike = v instanceof ImageView || v instanceof ImageButton || v instanceof Button;
-        if (!clickable && !imageLike) {
+        boolean hasId = !"-".equals(id);
+        String d = desc(v);
+        boolean hasDesc = !"-".equals(d);
+        if (!clickable && !imageLike && !hasId && !hasDesc) {
             return;
         }
         int w = v.getWidth();
@@ -184,28 +192,28 @@ public class HookMain implements IXposedHookLoadPackage {
         if (w <= 0 || h <= 0) {
             return;
         }
-        float density = v.getResources().getDisplayMetrics().density;
-        if (w > 240 * density || h > 120 * density) {
-            return;
-        }
 
         boolean fresh = SEEN.add(System.identityHashCode(v));
         if (DUMP_CONTROLS && fresh) {
+            int[] lc = location(v);
             log("CTRL " + v.getClass().getName()
                     + " id=" + id
                     + " click=" + v.isClickable()
-                    + " desc=" + desc(v)
+                    + " desc=" + d
+                    + " abs=[" + lc[0] + "," + lc[1] + "]["
+                    + (lc[0] + w) + "," + (lc[1] + h) + "]"
                     + " size=" + w + "x" + h
                     + " depth=" + depth);
         }
         if (APPLY_STYLE && fresh) {
-            applyStyle(v, id, density);
+            applyStyle(v, id);
         }
     }
 
-    /** 占位样式：圆角描边 + 极淡底色，用 overlay 叠加，不动原 background / ripple。 */
-    private static void applyStyle(View v, String id, float density) {
+    /** 保留样式实现，但普查阶段不调用；定下样式方向后把 APPLY_STYLE 打开即可。 */
+    private static void applyStyle(View v, String id) {
         try {
+            float density = v.getResources().getDisplayMetrics().density;
             GradientDrawable g = new GradientDrawable();
             g.setShape(GradientDrawable.RECTANGLE);
             g.setCornerRadius(14 * density);
@@ -217,6 +225,15 @@ public class HookMain implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             log("style error " + id + ": " + t);
         }
+    }
+
+    private static int[] location(View v) {
+        int[] lc = new int[2];
+        try {
+            v.getLocationOnScreen(lc);
+        } catch (Throwable ignored) {
+        }
+        return lc;
     }
 
     private static boolean isExcluded(String id) {
