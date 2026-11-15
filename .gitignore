@@ -8,7 +8,7 @@ local.properties
 
 # 日常抓取的日志和截图不入库；界面基线证据 evidence/ 入库。
 logs/*.log
-logs/ui-*.xml
+logs/*.xml
 screenshots/*.png
 screenshots/*.jpg
 

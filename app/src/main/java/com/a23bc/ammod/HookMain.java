@@ -41,7 +41,7 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "AMMod";
     private static final String TARGET = "com.apple.android.music";
-    private static final String VERSION = "v0.3.0";
+    private static final String VERSION = "v0.3.1";
 
     private static final boolean DUMP_CONTROLS = true;
     // 普查阶段：先只拿清单和位置，不动界面。
@@ -170,12 +170,15 @@ public class HookMain implements IXposedHookLoadPackage {
         // Compose 容器单独标记：内部按钮不是独立 View，模块侧只能记录容器位置。
         if (v.getClass().getName().contains("compose.ui.platform")
                 || "floating_app_bar_container".equals(id)) {
-            int[] lc = location(v);
-            log("COMPOSE_VIEW " + v.getClass().getName()
-                    + " id=" + id
-                    + " abs=[" + lc[0] + "," + lc[1] + "]["
-                    + (lc[0] + v.getWidth()) + "," + (lc[1] + v.getHeight()) + "]"
-                    + " depth=" + depth);
+            // 轮询每秒都会经过这里，必须去重，否则 COMPOSE_VIEW 会刷爆 logcat。
+            if (SEEN.add(System.identityHashCode(v))) {
+                int[] lc = location(v);
+                log("COMPOSE_VIEW " + v.getClass().getName()
+                        + " id=" + id
+                        + " abs=[" + lc[0] + "," + lc[1] + "]["
+                        + (lc[0] + v.getWidth()) + "," + (lc[1] + v.getHeight()) + "]"
+                        + " depth=" + depth);
+            }
             return;
         }
 
