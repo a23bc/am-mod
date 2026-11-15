@@ -77,6 +77,35 @@ public class HookMain implements IXposedHookLoadPackage {
             }
         });
 
+        // Fragment 切换时 Activity.onResume 不触发，且旧 View 常被复用（不再 addView）。
+        // 补一条 Fragment.onResume，才能覆盖歌单详情、设置这类二级页面。
+        try {
+            XposedHelpers.findAndHookMethod(
+                    "androidx.fragment.app.Fragment", lpparam.classLoader, "onResume",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                Object view = XposedHelpers.callMethod(param.thisObject, "getView");
+                                if (view instanceof View) {
+                                    final View v = (View) view;
+                                    v.post(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            scan(v, true);
+                                        }
+                                    });
+                                }
+                            } catch (Throwable t) {
+                                log("fragment hook error: " + t);
+                            }
+                        }
+                    });
+            log("fragment hook installed");
+        } catch (Throwable t) {
+            log("fragment hook unavailable: " + t);
+        }
+
         // 兜底：Activity 恢复时整棵树扫一次，防止某些 View 不经过 addView。
         XposedHelpers.findAndHookMethod(Activity.class, "onResume", new XC_MethodHook() {
             @Override
