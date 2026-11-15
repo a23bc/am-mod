@@ -21,33 +21,40 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * v0.2.0 —— 基础交互控件版。
+ * v0.2.2 —— 基础交互控件版。
  *
- * 目标不是某几个写死的页面，而是「返回、分享、更多、播放、收藏、三点菜单」这类
- * 基础交互控件。要跨页面生效，就不能只在 Activity.onResume 扫一遍当前页：
- * hook ViewGroup.addView，任何页面/弹窗/动态列表新建的 View 都会被扫到。
+ * 目标：跨页面覆盖「返回、分享、更多、播放、收藏、三点菜单」这类基础交互控件，
+ * 明确排除 mini player 与底部导航。
  *
- * 明确排除 mini player 与底部导航（用户不改这两块）。
+ * 三条触发路径，互为兜底：
+ *   1. ViewGroup.addView —— 新建 View（含列表滚动、弹窗）；
+ *   2. Activity.onResume —— 冷启动时整棵树扫一次；
+ *   3. 1s 轮询 DecorView —— Fragment 切换常复用旧 View（不再 addView），
+ *      而 Apple Music 把 AndroidX Fragment 类重打包了，实测
+ *      ClassNotFoundException: androidx.fragment.app.Fragment，没法 hook 它。
+ *      轮询是明知粗糙但可验证的兜底，靠 SEEN 去重保证不重复动手。
  *
  * 已知边界：顶部工具栏的返回/分享/更多按钮由 ComposeView
- * (floating_app_bar_container) 绘制，不是独立 View 实例，本版只能标记容器，
+ * (floating_app_bar_container) 绘制，不是独立 View，本版只能标记容器，
  * 改不到它们的视觉样式。详见 README。
  */
 public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "AMMod";
     private static final String TARGET = "com.apple.android.music";
-    private static final String VERSION = "v0.2.0";
+    private static final String VERSION = "v0.2.2";
 
     private static final boolean DUMP_CONTROLS = true;
     private static final boolean APPLY_STYLE = true;
+    private static final long TICKER_MS = 1000L;
 
     private static final Set<String> EXCLUDED_PREFIX = new HashSet<>(Arrays.asList(
             "mini_player_", "navigation_bar_item_", "top_level_", "player_sheet_"
     ));
 
-    private static final Set<Integer> STYLED = new HashSet<>();
+    private static final Set<Integer> SEEN = new HashSet<>();
     private static long sLastScan = 0L;
+    private static boolean sTickerStarted = false;
 
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
@@ -56,7 +63,6 @@ public class HookMain implements IXposedHookLoadPackage {
         }
         log("module loaded in " + lpparam.processName + " (" + VERSION + ")");
 
-        // 主入口：所有页面、所有后来动态加进来的 View 都会经过这里。
         XposedBridge.hookAllMethods(ViewGroup.class, "addView", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -77,36 +83,6 @@ public class HookMain implements IXposedHookLoadPackage {
             }
         });
 
-        // Fragment 切换时 Activity.onResume 不触发，且旧 View 常被复用（不再 addView）。
-        // 补一条 Fragment.onResume，才能覆盖歌单详情、设置这类二级页面。
-        try {
-            XposedHelpers.findAndHookMethod(
-                    "androidx.fragment.app.Fragment", lpparam.classLoader, "onResume",
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            try {
-                                Object view = XposedHelpers.callMethod(param.thisObject, "getView");
-                                if (view instanceof View) {
-                                    final View v = (View) view;
-                                    v.post(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            scan(v, true);
-                                        }
-                                    });
-                                }
-                            } catch (Throwable t) {
-                                log("fragment hook error: " + t);
-                            }
-                        }
-                    });
-            log("fragment hook installed");
-        } catch (Throwable t) {
-            log("fragment hook unavailable: " + t);
-        }
-
-        // 兜底：Activity 恢复时整棵树扫一次，防止某些 View 不经过 addView。
         XposedHelpers.findAndHookMethod(Activity.class, "onResume", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
@@ -118,6 +94,7 @@ public class HookMain implements IXposedHookLoadPackage {
                             scan(decor, true);
                         }
                     });
+                    startTicker(decor);
                 } catch (Throwable t) {
                     log("onResume hook error: " + t);
                 }
@@ -125,10 +102,27 @@ public class HookMain implements IXposedHookLoadPackage {
         });
     }
 
+    private static void startTicker(final View decor) {
+        if (sTickerStarted) {
+            return;
+        }
+        sTickerStarted = true;
+        decor.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (decor.isAttachedToWindow() && decor.getWindowVisibility() == View.VISIBLE) {
+                    scan(decor, true);
+                }
+                decor.postDelayed(this, TICKER_MS);
+            }
+        }, TICKER_MS);
+        log("ticker started (" + TICKER_MS + "ms)");
+    }
+
     private static void scan(View root, boolean force) {
         long now = System.currentTimeMillis();
         if (!force && now - sLastScan < 300L) {
-            return; // 列表滚动时 addView 极频繁，节流
+            return;
         }
         sLastScan = now;
         try {
@@ -173,7 +167,6 @@ public class HookMain implements IXposedHookLoadPackage {
             return;
         }
 
-        // 只标记 Compose 工具栏容器，不改它的样式（内部按钮不是独立 View）。
         if ("floating_app_bar_container".equals(id)) {
             log("COMPOSE_TOOLBAR " + v.getClass().getName()
                     + " size=" + v.getWidth() + "x" + v.getHeight()
@@ -192,12 +185,12 @@ public class HookMain implements IXposedHookLoadPackage {
             return;
         }
         float density = v.getResources().getDisplayMetrics().density;
-        // 只框按钮类小控件，跳过整行卡片 / 大图封面。
         if (w > 240 * density || h > 120 * density) {
             return;
         }
 
-        if (DUMP_CONTROLS) {
+        boolean fresh = SEEN.add(System.identityHashCode(v));
+        if (DUMP_CONTROLS && fresh) {
             log("CTRL " + v.getClass().getName()
                     + " id=" + id
                     + " click=" + v.isClickable()
@@ -205,8 +198,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     + " size=" + w + "x" + h
                     + " depth=" + depth);
         }
-
-        if (APPLY_STYLE && STYLED.add(System.identityHashCode(v))) {
+        if (APPLY_STYLE && fresh) {
             applyStyle(v, id, density);
         }
     }
