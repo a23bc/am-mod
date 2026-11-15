@@ -1,12 +1,10 @@
 package com.a23bc.ammod;
 
 import android.content.Context;
-import android.graphics.Bitmap;
 import android.graphics.BlendMode;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.RenderEffect;
 import android.graphics.RuntimeShader;
@@ -14,41 +12,43 @@ import android.graphics.Shader;
 import android.view.View;
 
 /**
- * 单个液态玻璃按钮（对应返回 / 分享 / 更多选项之一）。
+ * 单个液态玻璃按钮（返回 / 分享 / 更多选项之一）。
  *
- * 绘制顺序：界面快照（backdrop）→ 半透明玻璃底色 → 库同款方向性高光，
- * 整层再套 RenderEffect：先 blur(2dp)，再用库的 RoundedRectRefraction shader 做边缘折射。
+ * 半透明玻璃罩：不画不透明底，让下层原按钮图标透出来；
+ * 只叠玻璃 tint + 细描边 + 库同款 Highlight.Default 方向性边缘高光（仅描边），
+ * 整层再套 RenderEffect：blur(2dp) + 库的 RoundedRectRefraction 边缘折射。
  *
- * 触摸穿透：不 clickable、不设置 OnTouchListener，事件会继续派发给下层原按钮。
- * 本类的 API 33+ 调用由 GlassToolbar.install() 的 SDK_INT 判断保护。
+ * 触摸穿透：不 clickable、不设 OnTouchListener，事件继续派发给下层原按钮。
+ * API 33+ 调用由 GlassToolbar.install() 的 SDK_INT 判断保护。
  */
 public class GlassButtonView extends View {
 
     private final Paint mTint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mHighlight = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF mRect = new RectF();
-    private final Rect mSrc = new Rect();
-    private final Rect mDst = new Rect();
 
-    private Bitmap mSnapshot;
-    private int mSrcX;
-    private int mSrcY;
     private float mRadius;
+    private float mInset;
 
     public GlassButtonView(Context context) {
         super(context);
         setClickable(false);
         setFocusable(false);
-        // LiquidButton: onDrawSurface 会叠一层半透明 surface
-        mTint.setColor(Color.argb(34, 255, 255, 255));
+        mTint.setColor(Color.argb(26, 255, 255, 255));
+        mStroke.setStyle(Paint.Style.STROKE);
+        mStroke.setColor(Color.argb(64, 255, 255, 255));
+        mHighlight.setStyle(Paint.Style.STROKE);
         // Highlight.Default 的 blendMode = BlendMode.Plus
         mHighlight.setBlendMode(BlendMode.PLUS);
     }
 
     void configure(int w, int h, float density) {
-        mRect.set(0f, 0f, w, h);
-        mDst.set(0, 0, w, h);
         mRadius = Math.min(w, h) / 2f;
+        float sw = Math.max(1f, 0.5f * density);   // Highlight.width = 0.5dp
+        mInset = sw;
+        mHighlight.setStrokeWidth(sw);
+        mStroke.setStrokeWidth(Math.max(1f, 1f * density));
 
         RuntimeShader lens = new RuntimeShader(BackdropShaders.REFRACTION);
         lens.setFloatUniform("size", (float) w, (float) h);
@@ -74,28 +74,13 @@ public class GlassButtonView extends View {
         mHighlight.setShader(hi);
     }
 
-    void setSnapshot(Bitmap snapshot, int srcX, int srcY) {
-        mSnapshot = snapshot;
-        mSrcX = srcX;
-        mSrcY = srcY;
-    }
-
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        // 抓快照时自己不画，否则 decor.draw() 会无限递归。
-        if (GlassToolbar.CAPTURING) {
-            return;
-        }
-        int w = getWidth();
-        int h = getHeight();
-        if (mSnapshot != null && !mSnapshot.isRecycled()) {
-            mSrc.set(mSrcX, mSrcY, mSrcX + w, mSrcY + h);
-            canvas.drawBitmap(mSnapshot, mSrc, mDst, null);
-        } else {
-            canvas.drawColor(Color.argb(220, 44, 48, 56));
-        }
-        canvas.drawRoundRect(mRect, mRadius, mRadius, mTint);
-        canvas.drawRoundRect(mRect, mRadius, mRadius, mHighlight);
+        mRect.set(mInset, mInset, getWidth() - mInset, getHeight() - mInset);
+        float r = Math.max(1f, mRadius - mInset);
+        canvas.drawRoundRect(mRect, r, r, mTint);
+        canvas.drawRoundRect(mRect, r, r, mStroke);
+        canvas.drawRoundRect(mRect, r, r, mHighlight);
     }
 }

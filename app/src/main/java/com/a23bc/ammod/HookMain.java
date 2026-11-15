@@ -28,17 +28,14 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  *
  * 预览：返回 / 分享 / 更多选项是 Compose 绘制的，不是独立 View，
  * 改不了属性；改为在 DecorView 上叠三个自绘 View，用 Kyant0/AndroidLiquidGlass
- * 同款 AGSL shader 折射背后界面快照，触摸穿透保留原按钮行为。见 GlassToolbar。
+ * 同款 AGSL shader 做玻璃高光与边缘折射，触摸穿透保留原按钮行为。见 GlassToolbar。
  *
  * 三条触发路径互为兜底：
  *   1. ViewGroup.addView —— 新建 View；
  *   2. Activity.onResume —— 冷启动整棵树；
  *   3. 1s 轮询 DecorView —— Fragment 切换复用旧 View（不再 addView）。
- *      Apple Music 重打包了 AndroidX，实测找不到 androidx.fragment.app.Fragment，
+ *      Apple Music 重打包了 AndroidX，找不到 androidx.fragment.app.Fragment，
  *      没法 hook Fragment，所以保留这个粗糙但可验证的轮询。
- *
- * Compose 语义节点不是独立 View，模块里的 View 树拿不到它们；
- * 那部分由外部 `tools/inventory.sh` 走 accessibility 树采集（见 README）。
  */
 public class HookMain implements IXposedHookLoadPackage {
 
@@ -60,6 +57,7 @@ public class HookMain implements IXposedHookLoadPackage {
     private static long sLastScan = 0L;
     private static boolean sTickerStarted = false;
     private static boolean sGlassPosted = false;
+    private static boolean sPageHasToolbar = false;
 
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
@@ -130,10 +128,16 @@ public class HookMain implements IXposedHookLoadPackage {
             return;
         }
         sLastScan = now;
+        if (force) {
+            sPageHasToolbar = false;
+        }
         try {
             walk(root, 0);
         } catch (Throwable t) {
             log("scan error: " + t);
+        }
+        if (force) {
+            GlassToolbar.setVisible(sPageHasToolbar);
         }
     }
 
@@ -172,7 +176,14 @@ public class HookMain implements IXposedHookLoadPackage {
             return;
         }
 
-        // Compose 容器单独标记：内部按钮不是独立 View，模块侧只能记录容器位置。
+        // 这些 id 只出现在带顶部工具栏（返回 / 分享 / 更多选项）的页面：
+        // 歌单详情、全屏播放页。主页没有，用它控制玻璃层显隐。
+        if ("collection_header_artist".equals(id) || "button_play".equals(id)
+                || "play_pause".equals(id) || "player_controls".equals(id)
+                || "menu_action_button".equals(id)) {
+            sPageHasToolbar = true;
+        }
+
         if (v.getClass().getName().contains("compose.ui.platform")
                 || "floating_app_bar_container".equals(id)) {
             // 轮询每秒都会经过这里，必须去重，否则 COMPOSE_VIEW 会刷爆 logcat。
