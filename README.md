@@ -1,165 +1,163 @@
-# AM Mod — Apple Music (Android) LSPosed 模块脚手架
+# AM Mod — Apple Music (Android) LSPosed 模块
 
-一个最小可验证的 Xposed 模块：不做任何美观改动，只负责证明「模块能进 Apple Music 进程、
-能拿到完整 View 树、能改得动界面」，并把界面结构打到 logcat 作为下一版的定位依据。
+**目标：给 Apple Music 的基础交互控件（返回、分享、更多、播放、收藏、三点菜单…）换样式。**
+明确排除 mini player 与底部导航 —— 用户不改这两块。
 
-**版本：0.1.0**（脚手架，不是成品）
+**版本：0.2.2**（骨架 + 占位样式，最终样式待定）
 
 ---
 
-## 1. 原理，三句话
+## 0. 当前状态（2026-11-15 实测）
 
-1. LSPosed 把你写的 APK 当「模块」注入到**指定 App 的进程**里，不用改 Apple Music 的 APK。
-2. 模块入口是 `assets/xposed_init` 里那个类名，LSPosed 回调它的 `handleLoadPackage`；
+| 环节 | 状态 | 判据 |
+| --- | --- | --- |
+| CI 编译 | ✅ | run `43705842200` 全绿；`bash tools/fetch-artifact.sh 43705842200` 可取产物 |
+| 装机 | ✅ | `adb install -r` → Success，`versionName=0.2.2` |
+| 模块启用 / 作用域 | ✅ | 用户已在 LSPosed 启用；`module loaded` 出现 |
+| hook 命中 | ✅ | 主页 19 个控件、进详情页后累计 48 个，`errors=0` |
+| 占位样式生效 | ✅ | 每个命中控件叠加圆角描边（`STYLE` 行数 = `CTRL` 行数） |
+| **最终样式** | ⛔ 待定 | 需要用户指定；当前只是可验证的占位效果 |
+| **Compose 顶部工具栏** | ⛔ 未覆盖 | 返回 / 分享 / 更多按钮不是独立 View，见 §3 |
+
+---
+
+## 1. 原理
+
+1. LSPosed 把模块 APK 注入**指定 App 的进程**，不用改 Apple Music 的 APK。
+2. 入口是 `assets/xposed_init` 里的类名，LSPosed 回调 `handleLoadPackage`；
    我们只在 `lpparam.packageName == com.apple.android.music` 时动手。
-3. 在 `Activity.onResume` 之后遍历 `DecorView`，就能按资源 id 找到具体控件，
-   改背景、改文字、换 View、叠模糊层 —— 这就是「改界面」。
+3. 找到 View 后按规则改样式。要**跨页面**生效，靠三条触发路径互为兜底：
 
-`compileOnly` 是关键：Xposed API 的类由 LSPosed 运行时提供，**不能**打进模块 APK，否则类冲突。
+| 路径 | 覆盖 |
+| --- | --- |
+| `ViewGroup.addView` | 新建 View（列表滚动、弹窗、动态内容） |
+| `Activity.onResume` | 冷启动时整棵树扫一次 |
+| 1s 轮询 `DecorView` | Fragment 切换复用旧 View（不再 addView）的情况 |
+
+`SEEN` 按 `identityHashCode` 去重，轮询不会重复改同一个 View，也不会刷 logcat。
+`compileOnly` 是关键：Xposed API 由 LSPosed 运行时提供，**不能**打进 APK。
 
 ---
 
-## 2. 设备实测（2026-11-15，PJZ110）
-
-这些是本次真机上跑出来的事实，不是猜的；命令可重跑：
+## 2. 设备实测（PJZ110）
 
 | 项 | 结果 | 判据 |
 | --- | --- | --- |
 | Android | 17 | `adb shell getprop ro.build.version.release` |
 | Apple Music | `7.0.0` / versionCode `1614` / targetSdk 36 | `adb shell "dumpsys package com.apple.android.music \| grep versionName"` |
-| 包名 | `com.apple.android.music` | `adb shell pm list packages apple` |
-| 入口 Activity | `.common.MainActivity` | `adb shell cmd package resolve-activity --brief com.apple.android.music` |
+| 包名 / 入口 | `com.apple.android.music` / `.common.MainActivity` | `adb shell pm list packages apple` |
 | Root | KernelSU (`u:r:ksu:s0`) | `adb shell "su -c id"` |
-| LSPosed | `org.lsposed.daemon` + `zygisk_lsposed` | `adb shell pm list packages lsposed`、`adb shell "su -c 'ls /data/adb/modules'"` |
+| LSPosed | 2.2.1 + `zygisk_lsposed` | `adb shell pm list packages lsposed` |
 
-### 界面结构结论（重要）
-
-`evidence/ui-dump-2026-11-15.xml` 是真机 `uiautomator dump` 的基线，120 个节点：
-
-- 主界面是**传统 View + 稳定资源 id**，只有 3 个 `ComposeView`：
-  `main_container`、`listen_now_recycler`、`mini_player_title` / `mini_player_artist`、
-  `navigation_bar_item_icon_container` / `_small_label_view` / `_large_label_view`、`blur_target` 等都在。
-- 底部导航是 Material `BottomNavigationView` 风格的 id 命名。
-- **推论：改 bottom nav / mini player 走 View hook 就行，不用跟 Compose 死磕。**
-- 注意：`uiautomator dump` 看到的是 accessibility 树，和模块里 `View.getId()` +
-  `getResourceEntryName()` 拿到的真实 View 树不完全等价。第二版定位以模块打出来的
-  `view tree` 日志为准。
+设备上还有其它在 hook Apple Music 的模块：`org.francasio.sing`（AppleMusicSing，运行中）、
+`dev.a23bc.glass.extended`（未启用）、`com.a23bc.amviewdumper`（未启用）。改同一批 View 时注意冲突。
 
 ---
 
-## 3. 第一次跑通
+## 3. 控件分两类（关键结论）
 
-本机**不跑 Gradle**（JDK/SDK/Gradle 都不装到系统全局），编译走 GitHub Actions。
+> **作废声明**：v0.1.0 结论「主界面是传统 View，不用跟 Compose 死磕」**部分作废**。
+> 对内容区成立，但用户要改的**顶部基础控件恰恰是 Compose**。
+
+`evidence/ui-detail-2026-11-15.xml` 是详情页基线，`uiautomator dump` 的父链证明：
+`向上浏览。`（返回）、`分享`、`更多选项` 三个按钮都挂在
+`ComposeView(floating_app_bar_container)` 下面，全链是无 id 的 `android.view.View`
+语义节点，**不是可 hook 的独立 View 实例**。所以 View hook 改不到它们的视觉样式。
+
+### A. 传统 View 类（有稳定 id，已能改）
+
+`logs/amod-*.log` 里 `CTRL` 行去重后的 30 个控件，全部已应用占位样式：
+
+| 用途 | id |
+| --- | --- |
+| 播放控制 | `play_pause`、`previous_rewind`、`next_fast_forward`、`button_play`、`button_shuffle`、`button_action` |
+| 更多 / 菜单 | `list_left_icon`、`more`、`menu_action_button`、`bubble_tip_close`、`bubble_tip_symbol` |
+| 收藏 / 状态 | `list_favorite_icon`、`list_favorite_icon_status`、`shuffle_repeat_badge`、`badge_platter` |
+| 播放器辅助 | `player_lyrics`、`player_queue`、`media_route_button`、`vocal_ctrl`、`vocal_off`、`video_surface`、`audio_badge_icon`、`audio_badge_with_text` |
+| 图形 / 其它 | `thumbnail`、`lyrics_thumbnail_container`、`collection_header_artist`、`button_icon`、`icon_search`、`image_view` |
+
+注意 `uiautomator dump` 是 accessibility 树，和真实 View 树不等价；定位一律以模块
+`CTRL` 日志里的 `id=` 为准。
+
+### B. Compose 类（无 id，本版只标记容器）
+
+`floating_app_bar_container` 会出现在 `COMPOSE_TOOLBAR` 日志里，但内部按钮画在
+Compose 的 Canvas / semantics 上。要改它们得换做法（见 §7），不是调 `View.setBackground`。
+
+---
+
+## 4. 跑通
+
+本机**不跑 Gradle**，编译走 GitHub Actions。
 
 ```bash
-# 1) 推代码，CI 自动出 APK
 git push origin main
 gh run watch
-
-# 2) 取 APK 并装机（若 gh 报 EOF，见 §5 的 HTTP/1.1 fallback）
-gh run download --name am-mod-debug --dir tools/artifacts
+bash tools/fetch-artifact.sh <run_id>       # 取 APK 到 tools/artifacts/
 adb install -r tools/artifacts/app-debug.apk
 ```
 
-然后在手机上：
+LSPosed 管理器 → 模块 → 启用 **AM Mod** → 作用域勾 **Apple Music** → **强停 Apple Music 重开**。
 
-1. LSPosed 管理器 → 模块 → 启用 **AM Mod**；
-2. 作用域勾选 **Apple Music**（清单里已声明 `xposedscope`，一般会自动带出来）；
-3. **强停 Apple Music**（LSPosed 的 hook 要新进程才注入），再重新打开。
-
-### 判据：什么算「跑通」
-
-打开 Apple Music 后，mini player 会叠一层淡红、底部导航图标区叠一层淡蓝（验证用，不是最终效果）。
-再抓证据：
+抓证据：
 
 ```bash
 bash tools/capture.sh
-adb logcat -s AMMod:D
 ```
 
-| 现象 | 说明 |
+| `capture.sh` 指标 | 判据 |
 | --- | --- |
-| 一条 `module loaded` 都没有 | 模块没启用 / 作用域没勾 / 没强停 App |
-| 有 `module loaded`，但没有 `view tree begin` | `onResume` hook 没命中，需要换 hook 点（改 `HookMain`） |
-| 有 `view tree`，但 `highlight ... -> 0` | App 版本变了，资源 id 对不上，按新日志里的 id 重填 |
-| 三者都有 | 闭环成立，可以开始写真正想改的效果 |
+| `module loaded = 0` | 没启用 / 作用域没勾 / 没强停 |
+| `control entries = 0` | 三条触发路径都没命中 |
+| `styles applied < control entries` | 有控件样式应用失败，看 `style error` 行 |
+| `errors > 0` | 看 `error` 行定位 |
+| `compose toolbar` | 顶部 Compose 容器出现次数，仅供标记 |
 
-日志统一进 `logs/`，截图统一进 `screenshots/`，两者都不入库；`evidence/` 里的基线 XML 入库。
-
-### 当前验证进度（2026-11-15）
-
-| 环节 | 状态 | 判据 |
-| --- | --- | --- |
-| CI 编译 | ✅ 通过 | run `43704216473`，1m9s，`assembleDebug` + `upload-artifact` 全绿 |
-| Xposed API 82 解析 | ✅ 通过 | CI 编译成功，说明 `compileOnly` 坐标拉到了 |
-| APK 落本机 | ✅ 通过 | `am-mod-debug` 7116 bytes，内含 `app-debug.apk` |
-| 装机 | ✅ 通过 | `adb install -r` → `Success`；`pm path com.a23bc.ammod` 有输出 |
-| LSPosed 识别模块 | ✅ 通过 | `modules_config.db` 的 `modules` 表新增 `com.a23bc.ammod` 行，说明四个 `xposed*` meta-data 有效 |
-| **模块启用 / 作用域** | ⛔ **未做** | `modules_state` 与 `scope` 表都没有 `com.a23bc.ammod` 记录 |
-| hook 命中 | ⛔ 待验证 | 强停重开 Apple Music 后 `adb logcat -d -s AMMod:D` 为空，与上一条一致 |
-
-**结论：代码侧闭环已经走完，剩下的是设备侧一次人工启用**（LSPosed 管理器 → 模块 → 打开 AM Mod → 作用域勾 Apple Music → 强停 Apple Music 重开）。
-这步没做之前，日志为空是预期，不代表 hook 写错了。
-
-设备上还有其它在 hook Apple Music 的模块，改 UI 时注意别抢同一批 View：
-`org.francasio.sing`（AppleMusicSing，运行中，hook 歌词 RecyclerView / 音频）、
-`dev.a23bc.glass.extended`（未启用）、`com.a23bc.amviewdumper`（未启用）。
-LSPosed 版本 2.2.1，Android 17。
+日志进 `logs/`，截图进 `screenshots/`，基线证据进 `evidence/`，APK 进 `tools/artifacts/`；前三者按要求存放，后三者都不入库。
 
 ---
 
-## 4. 目录
+## 5. 目录
 
 ```
-.github/workflows/build.yml   CI：JDK 17 + Gradle 8.7 + AGP 8.6.1，产出 debug APK
-app/src/main/assets/xposed_init         模块入口类名（漏了模块完全没反应）
-app/src/main/AndroidManifest.xml        四个 xposed* meta-data + 推荐作用域
-app/src/main/java/.../HookMain.java     全部逻辑：加载日志 / View 树 dump / 命中染色
-app/src/main/res/values/arrays.xml      推荐作用域 com.apple.android.music
-evidence/ui-dump-2026-11-15.xml         真机界面基线
-tools/capture.sh                        一键抓界面 XML + AMMod 日志
-logs/ screenshots/ tools/artifacts/     日常产物（gitignore）
+.github/workflows/build.yml    CI：JDK 17 + Gradle 8.7 + AGP 8.6.1
+app/src/main/assets/xposed_init          模块入口类名
+app/src/main/AndroidManifest.xml         四个 xposed* meta-data + 推荐作用域
+app/src/main/java/.../HookMain.java      三条触发路径 / 控件筛选 / 占位样式
+app/src/main/res/values/arrays.xml       推荐作用域
+evidence/ui-dump-2026-11-15.xml          主页基线
+evidence/ui-detail-2026-11-15.xml        详情页基线（含 Compose 工具栏父链）
+tools/capture.sh                         抓界面 XML + AMMod 日志并统计
+tools/fetch-artifact.sh                  取 CI 产物（绕开本机 HTTP/2 问题）
 ```
 
 本仓库**不带 Gradle Wrapper**：CI 用 `gradle/actions/setup-gradle@v4` 的
-`gradle-version: '8.7'` 安装 Gradle 到 PATH 后直接跑 `gradle :app:assembleDebug`。
-用 Android Studio 打开项目时，IDE 会提示补 wrapper；不需要在本机装 Gradle。
+`gradle-version: '8.7'` 装 Gradle 到 PATH，直接跑 `gradle :app:assembleDebug`。
 
 ---
 
-## 5. 已排除的坑
+## 6. 已排除的坑
 
 - **本机 `curl` 访问 `api.xposed.info` / `repo1.maven.org` 报 schannel TLS 握手失败**
-  （`github.com` 正常）。这是本机代理的限制，不是依赖没了；构建在 Actions 上跑，
-  不受影响。`settings.gradle` 里同时配了官方仓库和阿里云 public 作兜底。
-- **Git Bash(MSYS) 会改写 `/sdcard/...`**：`adb shell uiautomator dump /sdcard/x.xml`
-  这种写法会静默失败，必须写成 `adb shell "uiautomator dump /sdcard/x.xml"`。
-  `tools/capture.sh` 已按这个写法固化。
-- **`gh` 取 artifact 报 EOF**：本机代理对 `api.github.com` 的 HTTP/2 连接不稳（`gh run list` 正常，
-  `run download` / artifacts 接口 EOF）；`curl --http1.1` 正常。可重跑的 fallback：
-
-```bash
-TOKEN=$(gh auth token); RUN_ID=43704216473
-ART_ID=$(curl -sS --http1.1 -H "Authorization: Bearer $TOKEN" \
-  "https://api.github.com/repos/a23bc/am-mod/actions/runs/$RUN_ID/artifacts" \
-  | python -c "import sys,json; print(json.load(sys.stdin)['artifacts'][0]['id'])")
-LOC=$(curl -sS --http1.1 -D - -o /dev/null -H "Authorization: Bearer $TOKEN" \
-  "https://api.github.com/repos/a23bc/am-mod/actions/artifacts/$ART_ID/zip" \
-  | tr -d '\r' | sed -n 's/^[Ll]ocation: //p' | head -1)
-curl -sS --http1.1 -L -o tools/artifacts/am-mod-debug.zip "$LOC"
-python -c "import zipfile; zipfile.ZipFile('tools/artifacts/am-mod-debug.zip').extractall('tools/artifacts')"
-```
-
-  注意 302 之后的 Azure Blob 请求**不能**再带 `Authorization`（预签名 URL 自带鉴权，双认证会被拒）。
+  （`github.com` 正常）。本机代理限制，不影响 Actions；`settings.gradle` 配了官方仓库 + 阿里云兜底。
+- **`gh` 取 artifact 报 EOF**：本机代理对 `api.github.com` 的 HTTP/2 连接不稳（`gh run list`
+  正常，artifacts 接口 EOF）。`curl --http1.1` 正常。`tools/fetch-artifact.sh` 已固化：
+  查 artifact id → 取 302 预签名地址 → 裸 URL 下载（**不能**带 `Authorization`，双认证会被 Azure 拒）。
+- **Git Bash(MSYS) 改写 `/sdcard/...`**：`adb shell uiautomator dump /sdcard/x.xml` 会静默失败，
+  必须写成 `adb shell "uiautomator dump /sdcard/x.xml"`。
+- **Windows python 不认 `/tmp/...`**：本机 python 是原生 Windows 版，脚本里经 `cygpath -m`
+  转成 `E:/...`。`core.autocrlf=true` 会把 shell 脚本转 CRLF，`.gitattributes` 已强制 `*.sh` 用 LF。
+- **`ClassNotFoundException: androidx.fragment.app.Fragment`**（v0.2.1 实测）：Apple Music
+  把 AndroidX 类重打包了，hook Fragment 这条路**作废**，改用 DecorView 轮询。
+- **v0.1.0 的 View 树 walk 中途断掉**：单个异常节点打断整棵树；现在逐节点 try/catch。
+- **v0.1.0 把示例染色对准 mini player / 底栏**：方向猜错，已作废并移除。
 
 ---
 
-## 6. 下一步
+## 7. 下一步（两件待定）
 
-这版只是地基。真正要「改成什么样」还需要两件事：
-
-1. 你指定要改哪块（底部导航 / mini player / 播放页 / 配色字体圆角…）和期望效果；
-2. 把 `bash tools/capture.sh` 产出的 `logs/amod-*.log` 给我 —— 里面的 `id=` 清单
-   决定了第二版 hook 精确打在哪几个 View 上，不靠猜。
-
-改效果时把 `HookMain.DUMP_TREE` 关掉，避免刷 logcat。
+1. **最终样式**：当前圆角描边只是占位，需要指定要换成什么（配色 / 圆角 / 图标 / 毛玻璃…），
+   然后改 `HookMain.applyStyle()`，并把 `DUMP_CONTROLS` 关掉。
+2. **Compose 顶部工具栏**（返回 / 分享 / 更多）：要不要一起改？需要另一套做法——
+   例如在 `floating_app_bar_container` 上按语义节点 bounds 叠加自绘层并转发点击，
+   或全局替换图标资源；不能靠 View 属性。
