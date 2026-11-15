@@ -23,7 +23,7 @@ import java.util.List;
 public class GlassBackdrop {
 
     private static final String TAG = "AMMod";
-    private static final int DOWNSCALE = 16;
+    private static final int DOWNSCALE = 28;
 
     private final View mDecor;
     private final List<View> mOverlays;
@@ -82,8 +82,8 @@ public class GlassBackdrop {
         cc.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
         cc.drawBitmap(mRaw, 0f, 0f, null);
         for (Rect r : mButtonRects) {
-            Rect rr = new Rect(Math.max(0, r.left - 12), Math.max(0, r.top - 12),
-                    Math.min(mW, r.right + 12), Math.min(mH, r.bottom + 12));
+            Rect rr = new Rect(Math.max(0, r.left - 28), Math.max(0, r.top - 28),
+                    Math.min(mW, r.right + 28), Math.min(mH, r.bottom + 28));
             cc.drawBitmap(mBlurred, rr, rr, null);
         }
         return mClean;

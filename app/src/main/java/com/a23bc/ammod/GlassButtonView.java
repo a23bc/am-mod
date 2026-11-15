@@ -53,7 +53,7 @@ public class GlassButtonView extends View {
         setClickable(false);
         setFocusable(false);
         mStroke.setStyle(Paint.Style.STROKE);
-        mStroke.setColor(Color.argb(150, 255, 255, 255));
+        mStroke.setColor(Color.argb(96, 255, 255, 255));
         mHighlight.setStyle(Paint.Style.STROKE);
         mHighlight.setBlendMode(BlendMode.PLUS);
         mIcon.setColor(Color.WHITE);
@@ -70,7 +70,7 @@ public class GlassButtonView extends View {
         mSrcX = srcX;
         mSrcY = srcY;
         mRadius = Math.min(w, h) / 2f;
-        float sw = Math.max(2f, 2f * density);
+        float sw = Math.max(1f, 1f * density);
         mInset = sw;
         mHighlight.setStrokeWidth(sw);
         mStroke.setStrokeWidth(Math.max(1f, 1f * density));
@@ -78,8 +78,8 @@ public class GlassButtonView extends View {
 
         mTint.setShader(new LinearGradient(
                 0f, 0f, 0f, h,
-                Color.argb(96, 255, 255, 255),
-                Color.argb(20, 255, 255, 255),
+                Color.argb(40, 255, 255, 255),
+                Color.argb(8, 255, 255, 255),
                 Shader.TileMode.CLAMP));
 
         RuntimeShader lens = new RuntimeShader(BackdropShaders.REFRACTION);
@@ -99,7 +99,7 @@ public class GlassButtonView extends View {
         RuntimeShader hi = new RuntimeShader(BackdropShaders.HIGHLIGHT);
         hi.setFloatUniform("size", (float) w, (float) h);
         hi.setFloatUniform("cornerRadii", mRadius, mRadius, mRadius, mRadius);
-        hi.setColorUniform("color", Color.valueOf(1f, 1f, 1f, 0.9f));
+        hi.setColorUniform("color", Color.valueOf(1f, 1f, 1f, 0.55f));
         hi.setFloatUniform("angle", (float) (45.0 * Math.PI / 180.0));
         hi.setFloatUniform("falloff", 1f);
         mHighlight.setShader(hi);
